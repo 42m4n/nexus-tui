@@ -1,7 +1,6 @@
 package nexus
 
 import (
-	"bytes"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -191,24 +190,4 @@ func (c *Client) Delete(path string) error {
 		return fmt.Errorf("writes are disabled; start with --allow-writes")
 	}
 	return c.do(http.MethodDelete, path, nil, nil)
-}
-
-// postJSON runs a bodyless POST (tasks run/stop, license, etc).
-func (c *Client) Post(path string) error {
-	var buf bytes.Buffer
-	req, err := http.NewRequest(http.MethodPost, c.base+path, &buf)
-	if err != nil {
-		return err
-	}
-	c.auth(req)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		return nil
-	}
-	return fmt.Errorf("POST %s: %s", path, resp.Status)
 }
