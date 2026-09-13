@@ -21,6 +21,15 @@ const (
 	scrAdminList
 )
 
+type adminKind int
+
+const (
+	adminUsers adminKind = iota
+	adminRoles
+	adminPrivileges
+	adminBlobs
+)
+
 type Model struct {
 	c      *nexus.Client
 	status string
@@ -40,7 +49,7 @@ type Model struct {
 
 	adminMenu []string
 	adminSel  int
-	adminKind string // users|roles|privileges|blobstores
+	adminKind adminKind // users|roles|privileges|blobstores
 	users     []nexus.User
 	userSel   int
 	roles     []nexus.Role
@@ -155,13 +164,13 @@ func doDelete(c *nexus.Client, path string) tea.Cmd {
 
 func (m Model) adminLoad() tea.Cmd {
 	switch m.adminKind {
-	case "users":
+	case adminUsers:
 		return loadUsers(m.c)
-	case "roles":
+	case adminRoles:
 		return loadRoles(m.c)
-	case "privileges":
+	case adminPrivileges:
 		return loadPrivs(m.c)
-	case "blobstores":
+	case adminBlobs:
 		return loadBlobs(m.c)
 	}
 	return nil
@@ -255,7 +264,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch {
 			case m.screen == scrBrowse:
 				return m, loadRepos(m.c)
-			case m.adminKind == "users":
+			case m.adminKind == adminUsers:
 				return m, loadUsers(m.c)
 			}
 		}
@@ -324,7 +333,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case scrAdmin:
 		moveCursor(msg, len(m.adminMenu), &m.adminSel)
 		if msg.String() == "enter" || msg.String() == "right" || msg.String() == "l" {
-			kinds := []string{"users", "roles", "privileges", "blobstores"}
+			kinds := []adminKind{adminUsers, adminRoles, adminPrivileges, adminBlobs}
 			m.adminKind = kinds[m.adminSel]
 			m.screen = scrAdminList
 			return m, m.adminLoad()
@@ -371,7 +380,7 @@ func (m Model) startDelete() (tea.Model, tea.Cmd) {
 		m.confirm = confirmModal{active: true, prompt: "delete repository", expect: r.Name, path: "/repositories/" + r.Name}
 		return m, nil
 	}
-	if m.screen == scrAdminList && m.adminKind == "users" && len(m.users) > 0 {
+	if m.screen == scrAdminList && m.adminKind == adminUsers && len(m.users) > 0 {
 		u := m.users[m.userSel]
 		m.confirm = confirmModal{active: true, prompt: "delete user", expect: u.UserID, path: "/security/users/" + u.UserID}
 		return m, nil
@@ -421,13 +430,13 @@ func (m Model) listKey(msg tea.KeyMsg, n int, sel *int) (tea.Model, tea.Cmd) {
 
 func (m Model) adminListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.adminKind {
-	case "users":
+	case adminUsers:
 		moveCursor(msg, len(m.users), &m.userSel)
-	case "roles":
+	case adminRoles:
 		moveCursor(msg, len(m.roles), &m.roleSel)
-	case "privileges":
+	case adminPrivileges:
 		moveCursor(msg, len(m.privs), &m.privSel)
-	case "blobstores":
+	case adminBlobs:
 		moveCursor(msg, len(m.blobs), &m.blobSel)
 	}
 	if msg.String() == "left" || msg.String() == "h" || msg.String() == "esc" {
@@ -616,22 +625,22 @@ func (m Model) viewAdminList(h int) string {
 		rows = 1
 	}
 	switch m.adminKind {
-	case "users":
+	case adminUsers:
 		return window(m.users, m.userSel, rows, func(i int) string {
 			u := m.users[i]
 			return fmt.Sprintf("%-20s %-30s %s", u.UserID, u.Email, u.Source)
 		})
-	case "roles":
+	case adminRoles:
 		return window(m.roles, m.roleSel, rows, func(i int) string {
 			r := m.roles[i]
 			return fmt.Sprintf("%-25s %s", r.Name, trim(r.Description, 60))
 		})
-	case "privileges":
+	case adminPrivileges:
 		return window(m.privs, m.privSel, rows, func(i int) string {
 			p := m.privs[i]
 			return fmt.Sprintf("%-30s %-20s %s", p.Name, p.Type, trim(p.Description, 50))
 		})
-	case "blobstores":
+	case adminBlobs:
 		return window(m.blobs, m.blobSel, rows, func(i int) string {
 			b := m.blobs[i]
 			return fmt.Sprintf("%-20s %-8s blobs:%d size:%d", b.Name, b.Type, b.BlobCount, b.TotalSize)
