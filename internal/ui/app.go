@@ -34,6 +34,7 @@ type Model struct {
 	c      *nexus.Client
 	status string
 	err    string
+	msg    string
 
 	screen screen
 	focus  int // 0 = left/top pane, 1 = right/detail pane
@@ -125,6 +126,10 @@ type blobsLoaded struct {
 	err   error
 }
 type actionDone struct{ err error }
+type invalidateDone struct {
+	err  error
+	repo string
+}
 
 // ---- commands ----
 
@@ -162,7 +167,7 @@ func doDelete(c *nexus.Client, path string) tea.Cmd {
 	return func() tea.Msg { return actionDone{c.Delete(path)} }
 }
 func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
-	return func() tea.Msg { return actionDone{c.InvalidateCache(repo)} }
+	return func() tea.Msg { return invalidateDone{c.InvalidateCache(repo), repo} }
 }
 
 func (m Model) adminLoad() tea.Cmd {
@@ -193,6 +198,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = msg.status
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case reposLoaded:
@@ -202,6 +208,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case compsLoaded:
@@ -212,6 +219,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case tasksLoaded:
@@ -220,6 +228,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case usersLoaded:
@@ -229,6 +238,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case rolesLoaded:
@@ -238,6 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case privsLoaded:
@@ -247,6 +258,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case blobsLoaded:
@@ -256,6 +268,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 		}
 		return m, nil
 	case actionDone:
@@ -263,6 +276,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err.Error()
 		} else {
 			m.err = ""
+			m.msg = ""
 			m.confirm = confirmModal{}
 			switch {
 			case m.screen == scrBrowse:
@@ -270,6 +284,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case m.adminKind == adminUsers:
 				return m, loadUsers(m.c)
 			}
+		}
+		return m, nil
+	case invalidateDone:
+		m.confirm = confirmModal{}
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			m.msg = ""
+		} else {
+			m.err = ""
+			m.msg = ""
+			m.msg = "cache invalidated: " + msg.repo
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -553,6 +578,9 @@ func (m Model) footer() string {
 	if m.confirm.active {
 		return fmt.Sprintf("%s %q -> type %q: [%s]  enter=confirm esc=cancel",
 			errStyle.Render("CONFIRM"), m.confirm.prompt, m.confirm.expect, m.confirm.input)
+	}
+	if m.msg != "" {
+		return okStyle.Render(trim(m.msg, m.width))
 	}
 	switch m.screen {
 	case scrBrowse:
