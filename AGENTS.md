@@ -27,7 +27,7 @@
 - `screen` enum controls active view.
 - `focus` int toggles left/right panes in browse.
 - `window[T]` helper renders scrollable lists; cursor stays in viewport.
-- Confirm modal for all destructive/write actions (delete, invalidate cache); `esc` cancels, `enter` only when typed name matches target.
+- Confirm modal for destructive actions (delete); `esc` cancels, `enter` only when typed name matches target. Cache invalidation is gated by `Writes` but needs no confirmation (non-destructive).
 
 ## Known simplifications (ponytail)
 

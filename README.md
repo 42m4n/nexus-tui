@@ -9,7 +9,7 @@ A read-mostly terminal UI for managing Nexus Repository 3. Built with Go + Bubbl
 - Tasks list with state/detail
 - Admin read views: users, roles, privileges, blob stores
 - Gated deletes: repository + user, typed confirmation required
-- Gated cache invalidation for proxy/group repositories, typed confirmation required
+- Gated cache invalidation for proxy/group repositories (no confirmation; cache re-populates on demand)
 - Config file + env overrides
 - `--insecure` for self-signed certs
 - Status header with writable/read-only indicator
@@ -60,7 +60,7 @@ NEXUS_INSECURE=true
 | `tab` | Switch pane (browse) |
 | `/` | Focus search |
 | `d` | Delete (repo or user) |
-| `i` | Invalidate cache (proxy/group repo) |
+| `i` | Invalidate cache (proxy/group repo, immediate) |
 | `r` | Refresh |
 | `esc` | Back |
 | `q` | Quit |
