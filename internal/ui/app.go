@@ -11,6 +11,9 @@ import (
 	"nexus-tui/internal/nexus"
 )
 
+// Version is set at build time: -ldflags "-X ui.Version=vX.Y.Z"
+var Version = "dev"
+
 type screen int
 
 const (
@@ -39,11 +42,11 @@ type Model struct {
 	screen screen
 	focus  int // 0 = left/top pane, 1 = right/detail pane
 
-	repos    []nexus.Repository
-	repoSel  int
-	comps    []nexus.Component
-	compSel  int
-	loading  bool
+	repos   []nexus.Repository
+	repoSel int
+	comps   []nexus.Component
+	compSel int
+	loading bool
 
 	tasks   []nexus.Task
 	taskSel int
@@ -518,13 +521,13 @@ func moveCursor(msg tea.KeyMsg, n int, sel *int) bool {
 // ---- view ----
 
 var (
-	titleStyle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	selStyle    = lipgloss.NewStyle().Reverse(true)
-	dimStyle    = lipgloss.NewStyle().Faint(true)
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	paneStyle   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-	activePane  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12"))
+	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	selStyle   = lipgloss.NewStyle().Reverse(true)
+	dimStyle   = lipgloss.NewStyle().Faint(true)
+	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	paneStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
+	activePane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12"))
 )
 
 func (m Model) View() string {
@@ -561,7 +564,7 @@ func (m Model) header() string {
 	if m.status != "writable" {
 		dot = errStyle.Render("●")
 	}
-	return fmt.Sprintf("%s Nexus TUI   status: %s   writes: %s", titleStyle.Render("NEXUS"), m.status, onOff(m.c.Writes)) + "   " + dot
+	return fmt.Sprintf("%s Nexus TUI %s   status: %s   writes: %s", titleStyle.Render("NEXUS"), Version, m.status, onOff(m.c.Writes)) + "   " + dot
 }
 
 func onOff(b bool) string {

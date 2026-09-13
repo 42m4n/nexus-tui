@@ -12,6 +12,8 @@ import (
 	"nexus-tui/internal/ui"
 )
 
+var version = "dev"
+
 func main() {
 	profile := flag.String("profile", "", "config profile name")
 	cfgPath := flag.String("config", "", "config file path (default ~/.config/nexus-tui/config.yaml)")
@@ -21,7 +23,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("nexus-tui 0.2.0")
+		fmt.Println("nexus-tui", version)
 		return
 	}
 

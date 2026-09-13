@@ -9,15 +9,15 @@ type Repository struct {
 }
 
 type Asset struct {
-	ID         string `json:"id"`
-	Repository string `json:"repository"`
-	Format     string `json:"format"`
-	Path       string `json:"path"`
-	DownloadURL string `json:"downloadUrl"`
-	ContentType string `json:"contentType"`
+	ID           string `json:"id"`
+	Repository   string `json:"repository"`
+	Format       string `json:"format"`
+	Path         string `json:"path"`
+	DownloadURL  string `json:"downloadUrl"`
+	ContentType  string `json:"contentType"`
 	LastModified string `json:"lastModified"`
-	FileSize   int64  `json:"fileSize"`
-	Checksum   struct {
+	FileSize     int64  `json:"fileSize"`
+	Checksum     struct {
 		SHA1 string `json:"sha1"`
 		MD5  string `json:"md5"`
 	} `json:"checksum"`
@@ -45,13 +45,13 @@ type Task struct {
 }
 
 type User struct {
-	UserID     string `json:"userId"`
-	FirstName  string `json:"firstName"`
-	LastName   string `json:"lastName"`
-	Email      string `json:"emailAddress"`
-	Source     string `json:"source"`
-	Status     string `json:"status"`
-	ReadOnly   bool   `json:"readOnly"`
+	UserID        string   `json:"userId"`
+	FirstName     string   `json:"firstName"`
+	LastName      string   `json:"lastName"`
+	Email         string   `json:"emailAddress"`
+	Source        string   `json:"source"`
+	Status        string   `json:"status"`
+	ReadOnly      bool     `json:"readOnly"`
 	ExternalRoles []string `json:"externalRoles"`
 }
 
@@ -70,11 +70,11 @@ type Privilege struct {
 }
 
 type BlobStore struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
-	BlobCount int64 `json:"blobCount"`
-	TotalSize int64 `json:"totalSize"`
-	AvailableSpace int64 `json:"availableSpace"`
+	Name           string `json:"name"`
+	Type           string `json:"type"`
+	BlobCount      int64  `json:"blobCount"`
+	TotalSize      int64  `json:"totalSize"`
+	AvailableSpace int64  `json:"availableSpace"`
 }
 
 type page[T any] struct {

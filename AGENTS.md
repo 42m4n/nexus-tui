@@ -13,7 +13,25 @@
 
 - Unit tests with `httptest` + recorded JSON fixtures in `internal/nexus/client_test.go` and `internal/config/config_test.go`.
 - No framework beyond stdlib `testing`.
-- `go test ./...` + `go vet ./...` must pass before merge.
+- Table-driven tests with `t.Run` subtests; case names state the scenario.
+- Test helpers stay in `_test.go` files, same package; no `internal/testutil`.
+- Failure messages name got vs want: `t.Errorf("got %q, want %q", got, want)`.
+- New non-trivial logic (branch, parser, HTTP path) ships with its test in the same change.
+- Before every commit: `gofmt -l .` must print nothing, then `go test ./...` and `go vet ./...` must pass. Do not commit if any fails. Run these without being asked.
+
+## Versioning
+
+- SemVer: `feat` → minor, `fix` → patch, breaking change → major. Pre-1.0 may break freely.
+- `var version = "dev"` in `cmd/nexus-tui/main.go`; release builds set it via
+  `go build -ldflags "-X main.version=vX.Y.Z"`.
+- Release = annotated tag only: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`.
+- Tag/bump only when asked — never tag unprompted.
+
+## Commits
+
+- Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`.
+- `type: lowercase imperative summary` — no scope needed at this repo size.
+- One logical change per commit; never mix fix + refactor.
 
 ## Adding an API endpoint
 
