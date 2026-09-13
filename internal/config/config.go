@@ -21,20 +21,17 @@ type Config struct {
 	Profiles map[string]Profile `yaml:"profiles"`
 }
 
-func DefaultPath() string {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return "config.yaml"
-	}
-	return filepath.Join(dir, "nexus-tui", "config.yaml")
-}
-
 // Load reads the config file and applies env overrides. A missing file is
 // not an error; env vars may supply everything.
 func Load(path string) (Config, error) {
 	var c Config
 	if path == "" {
-		path = DefaultPath()
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			path = "config.yaml"
+		} else {
+			path = filepath.Join(dir, "nexus-tui", "config.yaml")
+		}
 	}
 	if b, err := os.ReadFile(path); err == nil {
 		if err := yaml.Unmarshal(b, &c); err != nil {
@@ -81,9 +78,6 @@ func (c Config) Select(name string) (Profile, error) {
 	p, ok := c.Profiles[name]
 	if !ok {
 		return Profile{}, fmt.Errorf("profile %q not found", name)
-	}
-	if p.URL == "" {
-		return Profile{}, fmt.Errorf("profile %q has no url", name)
 	}
 	return p, nil
 }

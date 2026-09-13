@@ -35,6 +35,10 @@ func main() {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
 	}
+	if p.URL == "" {
+		fmt.Fprintln(os.Stderr, "config: no url set; export NEXUS_URL or set url in config")
+		os.Exit(1)
+	}
 	if *insecure {
 		p.Insecure = true
 	}
