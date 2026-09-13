@@ -188,6 +188,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case compsLoaded:
@@ -196,12 +198,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case tasksLoaded:
 		m.tasks = msg.tasks
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case usersLoaded:
@@ -209,6 +215,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.userSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case rolesLoaded:
@@ -216,6 +224,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.roleSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case privsLoaded:
@@ -223,6 +233,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.privSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case blobsLoaded:
@@ -230,6 +242,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blobSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
+		} else {
+			m.err = ""
 		}
 		return m, nil
 	case actionDone:
