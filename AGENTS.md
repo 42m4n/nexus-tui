@@ -9,6 +9,14 @@
 - Read-only by default; writes gated by `Client.Writes` flag + typed confirmation in UI.
 - Pagination uses continuation tokens; `getPage` caps at 1000 pages (ponytail: raise or stream if a repo ever exceeds ~100k items).
 
+## Live test instance
+
+- Config: `~/.config/nexus-tui/config.yaml` (profile `prod`); run `./nexus-tui` against it for live testing.
+- Health screens worth checking there: `5` (status checks + blob stores), `1` (browse).
+- Drive the TUI headless via tmux: `tmux new-session -d -s nxt -x 120 -y 40 './nexus-tui'`, then `tmux send-keys -t nxt 5` and `tmux capture-pane -t nxt -p`.
+- Verify API shapes against the live server before writing types — swagger guesses caused two fixture bugs (see commit `67142c2`). No per-repo health endpoint exists on OSS Nexus; use `GET /v1/status/check` (needs `nexus:metrics:read`).
+- Never run write actions against the live instance (delete, invalidate) without explicit user request.
+
 ## Testing
 
 - Unit tests with `httptest` + recorded JSON fixtures in `internal/nexus/client_test.go` and `internal/config/config_test.go`.
