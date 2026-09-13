@@ -3,7 +3,6 @@ package nexus
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,7 +45,7 @@ func New(rawURL string, insecure bool, username, password, token string) (*Clien
 
 func (c *Client) auth(req *http.Request) {
 	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+base64.StdEncoding.EncodeToString([]byte(c.token)))
+		req.Header.Set("Authorization", "Bearer "+c.token)
 		return
 	}
 	if c.user != "" {
