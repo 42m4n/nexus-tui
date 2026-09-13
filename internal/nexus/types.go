@@ -77,6 +77,15 @@ type BlobStore struct {
 	AvailableSpace int64  `json:"availableSpace"`
 }
 
+type RepoStatus struct {
+	Healthy     bool   `json:"healthy"`
+	Description string `json:"description"`
+}
+
+type ReadOnly struct {
+	ReadOnly bool `json:"readOnly"`
+}
+
 type page[T any] struct {
 	Items             []T    `json:"items"`
 	ContinuationToken string `json:"continuationToken"`

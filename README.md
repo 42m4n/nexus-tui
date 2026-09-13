@@ -54,7 +54,7 @@ NEXUS_INSECURE=true
 
 | Key | Action |
 |---|---|
-| `1-4` | Switch view (Browse/Search/Tasks/Admin) |
+| `1-5` | Switch view (Browse/Search/Tasks/Admin/Health) |
 | `j/k` or `up/down` | Move cursor |
 | `enter` | Select / open |
 | `tab` | Switch pane (browse) |

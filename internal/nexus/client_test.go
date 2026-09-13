@@ -147,6 +147,55 @@ func TestSearchPassesFilters(t *testing.T) {
 	}
 }
 
+func TestRepoStatus(t *testing.T) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/service/rest/v1/repositories/maven-central/status" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{"healthy":false,"description":"Remote unavailable: connection timed out"}`))
+	}))
+	st, err := c.RepoStatus("maven-central")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Healthy || st.Description != "Remote unavailable: connection timed out" {
+		t.Fatalf("status = %+v", st)
+	}
+	if _, err := c.RepoStatus(""); err == nil {
+		t.Fatal("expected error for empty repository")
+	}
+}
+
+func TestReadOnly(t *testing.T) {
+	t.Run("read-only mode off", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/service/rest/v1/read-only" {
+				t.Errorf("path = %s", r.URL.Path)
+			}
+			w.Write([]byte(`{"readOnly":false}`))
+		}))
+		ro, err := c.ReadOnly()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ro {
+			t.Fatal("readOnly = true, want false")
+		}
+	})
+	t.Run("read-only mode on", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"readOnly":true}`))
+		}))
+		ro, err := c.ReadOnly()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ro {
+			t.Fatal("readOnly = false, want true")
+		}
+	})
+}
+
 func TestErrorIncludesStatus(t *testing.T) {
 	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusUnauthorized)

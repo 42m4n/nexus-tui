@@ -22,6 +22,7 @@ const (
 	scrTasks
 	scrAdmin
 	scrAdminList
+	scrHealth
 )
 
 type adminKind int
@@ -63,11 +64,22 @@ type Model struct {
 	blobs     []nexus.BlobStore
 	blobSel   int
 
+	repoHealth []repoHealth
+	healthSel  int
+	readOnly   bool
+	roKnown    bool
+
 	query textinput.Model
 
 	confirm confirmModal
 
 	width, height int
+}
+
+type repoHealth struct {
+	name string
+	st   nexus.RepoStatus
+	err  string
 }
 
 type confirmModal struct {
@@ -133,6 +145,15 @@ type invalidateDone struct {
 	err  error
 	repo string
 }
+type readOnlyLoaded struct {
+	ro  bool
+	err error
+}
+type repoHealthLoaded struct {
+	name string
+	st   nexus.RepoStatus
+	err  error
+}
 
 // ---- commands ----
 
@@ -171,6 +192,27 @@ func doDelete(c *nexus.Client, path string) tea.Cmd {
 }
 func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
 	return func() tea.Msg { return invalidateDone{c.InvalidateCache(repo), repo} }
+}
+func loadReadOnly(c *nexus.Client) tea.Cmd {
+	return func() tea.Msg { ro, err := c.ReadOnly(); return readOnlyLoaded{ro, err} }
+}
+func loadRepoHealth(c *nexus.Client, repo string) tea.Cmd {
+	return func() tea.Msg { st, err := c.RepoStatus(repo); return repoHealthLoaded{repo, st, err} }
+}
+
+// enterHealth resets the repo health list from the current repo list and
+// fires all checks: read-only mode, per-repo status, storage.
+func (m Model) enterHealth() (tea.Model, tea.Cmd) {
+	m.repoHealth = make([]repoHealth, len(m.repos))
+	cmds := []tea.Cmd{loadReadOnly(m.c), loadBlobs(m.c)}
+	for i, r := range m.repos {
+		m.repoHealth[i] = repoHealth{name: r.Name}
+		cmds = append(cmds, loadRepoHealth(m.c, r.Name))
+	}
+	if len(m.repos) == 0 {
+		cmds = append(cmds, loadRepos(m.c))
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) adminLoad() tea.Cmd {
@@ -212,6 +254,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = ""
 			m.msg = ""
+		}
+		if m.screen == scrHealth {
+			return m.enterHealth()
 		}
 		return m, nil
 	case compsLoaded:
@@ -300,6 +345,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msg = "cache invalidated: " + msg.repo
 		}
 		return m, nil
+	case readOnlyLoaded:
+		if msg.err != nil {
+			m.err = msg.err.Error()
+		} else {
+			m.err = ""
+			m.readOnly = msg.ro
+			m.roKnown = true
+		}
+		return m, nil
+	case repoHealthLoaded:
+		for i := range m.repoHealth {
+			if m.repoHealth[i].name == msg.name {
+				if msg.err != nil {
+					m.repoHealth[i].err = msg.err.Error()
+				} else {
+					m.repoHealth[i].st = msg.st
+				}
+				return m, nil
+			}
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -338,6 +404,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = scrAdmin
 		m.query.Blur()
 		return m, nil
+	case "5":
+		m.screen = scrHealth
+		m.query.Blur()
+		return m.enterHealth()
 	case "r":
 		switch m.screen {
 		case scrBrowse:
@@ -346,6 +416,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, loadTasks(m.c)
 		case scrAdminList:
 			return m, m.adminLoad()
+		case scrHealth:
+			return m.enterHealth()
 		}
 	case "d":
 		return m.startDelete()
@@ -374,6 +446,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case scrAdminList:
 		return m.adminListKey(msg)
+	case scrHealth:
+		moveCursor(msg, len(m.repoHealth), &m.healthSel)
+		return m, nil
 	}
 	return m, nil
 }
@@ -550,9 +625,11 @@ func (m Model) View() string {
 	case scrTasks:
 		b.WriteString(m.viewTasks(bodyH))
 	case scrAdmin:
-		b.WriteString(m.viewAdmin(bodyH))
+		return m.viewAdmin(bodyH)
 	case scrAdminList:
-		b.WriteString(m.viewAdminList(bodyH))
+		return m.viewAdminList(bodyH)
+	case scrHealth:
+		return m.viewHealth(bodyH)
 	}
 	b.WriteString("\n")
 	b.WriteString(m.footer())
@@ -596,6 +673,8 @@ func (m Model) footer() string {
 		return "[j/k] move  [enter] open  [esc] back"
 	case scrAdminList:
 		return "[j/k] move  [d] delete user  [r] refresh  [esc] back"
+	case scrHealth:
+		return "[j/k] move  [r] refresh  [esc] back  [q] quit"
 	}
 	return ""
 }
@@ -700,6 +779,64 @@ func (m Model) viewAdminList(h int) string {
 		})
 	}
 	return ""
+}
+
+// viewHealth renders: server line, per-repo health list, storage summary.
+func (m Model) viewHealth(h int) string {
+	var b strings.Builder
+
+	// server line
+	ro := "unknown"
+	if m.roKnown {
+		ro = onOff(m.readOnly)
+	}
+	writes := okStyle.Render("writable")
+	if m.status != "writable" {
+		writes = errStyle.Render(m.status)
+	}
+	roField := "read-only: " + ro
+	if m.roKnown && m.readOnly {
+		roField = errStyle.Render(roField)
+	}
+	b.WriteString(fmt.Sprintf("server: %s   %s", writes, roField))
+
+	// repo list gets the remaining rows minus storage section
+	list := window(m.repoHealth, m.healthSel, max(1, h-6), func(i int) string {
+		rh := m.repoHealth[i]
+		switch {
+		case rh.err != "":
+			return errStyle.Render("✗") + fmt.Sprintf("  %-20s %s", rh.name, trim(rh.err, 60))
+		case rh.st.Healthy:
+			return okStyle.Render("●") + fmt.Sprintf("  %-20s %s", rh.name, dimStyle.Render("healthy"))
+		default:
+			return errStyle.Render("●") + fmt.Sprintf("  %-20s %s", rh.name, trim(rh.st.Description, 60))
+		}
+	})
+	b.WriteString("\n" + list)
+
+	// storage: one line per blob store
+	b.WriteString("\n" + titleStyle.Render("storage"))
+	for _, bl := range m.blobs {
+		marker := okStyle.Render("●")
+		if bl.AvailableSpace < 1<<30 { // under 1 GiB
+			marker = errStyle.Render("●")
+		}
+		b.WriteString("\n" + fmt.Sprintf("%s %-20s %s free", marker, bl.Name, humanBytes(bl.AvailableSpace)))
+	}
+	return b.String()
+}
+
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<30:
+		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
 }
 
 // window renders a scrollable, selectable list of n rows.

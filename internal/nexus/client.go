@@ -177,6 +177,26 @@ func (c *Client) Privileges() ([]Privilege, error) {
 	return out, err
 }
 
+// RepoStatus returns the health of a repository's remote connection (proxy
+// repos) or storage. Requires Nexus 3.41+; 404 on older servers.
+func (c *Client) RepoStatus(repository string) (RepoStatus, error) {
+	var out RepoStatus
+	if repository == "" {
+		return out, fmt.Errorf("repository required")
+	}
+	err := c.get("/repositories/"+repository+"/status", nil, &out)
+	return out, err
+}
+
+// ReadOnly reports the server-wide read-only mode.
+func (c *Client) ReadOnly() (bool, error) {
+	var out ReadOnly
+	if err := c.get("/read-only", nil, &out); err != nil {
+		return false, err
+	}
+	return out.ReadOnly, nil
+}
+
 func (c *Client) BlobStores() ([]BlobStore, error) {
 	var out []BlobStore
 	err := c.get("/blobstores", nil, &out)
