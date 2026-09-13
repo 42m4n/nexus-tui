@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -64,10 +65,10 @@ type Model struct {
 	blobs     []nexus.BlobStore
 	blobSel   int
 
-	repoHealth []repoHealth
-	healthSel  int
-	readOnly   bool
-	roKnown    bool
+	checks   []checkRow
+	checkSel int
+	readOnly nexus.ReadOnlyState
+	roKnown  bool
 
 	query textinput.Model
 
@@ -76,10 +77,9 @@ type Model struct {
 	width, height int
 }
 
-type repoHealth struct {
+type checkRow struct {
 	name string
-	st   nexus.RepoStatus
-	err  string
+	st   nexus.CheckResult
 }
 
 type confirmModal struct {
@@ -146,13 +146,12 @@ type invalidateDone struct {
 	repo string
 }
 type readOnlyLoaded struct {
-	ro  bool
+	ro  nexus.ReadOnlyState
 	err error
 }
-type repoHealthLoaded struct {
-	name string
-	st   nexus.RepoStatus
-	err  error
+type checksLoaded struct {
+	checks []checkRow
+	err    error
 }
 
 // ---- commands ----
@@ -196,23 +195,25 @@ func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
 func loadReadOnly(c *nexus.Client) tea.Cmd {
 	return func() tea.Msg { ro, err := c.ReadOnly(); return readOnlyLoaded{ro, err} }
 }
-func loadRepoHealth(c *nexus.Client, repo string) tea.Cmd {
-	return func() tea.Msg { st, err := c.RepoStatus(repo); return repoHealthLoaded{repo, st, err} }
+func loadChecks(c *nexus.Client) tea.Cmd {
+	return func() tea.Msg {
+		m, err := c.StatusChecks()
+		if err != nil {
+			return checksLoaded{err: err}
+		}
+		rows := make([]checkRow, 0, len(m))
+		for name, st := range m {
+			rows = append(rows, checkRow{name: name, st: st})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].name < rows[j].name })
+		return checksLoaded{checks: rows}
+	}
 }
 
-// enterHealth resets the repo health list from the current repo list and
-// fires all checks: read-only mode, per-repo status, storage.
+// enterHealth fires the health screen loads: system status checks,
+// read-only state, and blob store space.
 func (m Model) enterHealth() (tea.Model, tea.Cmd) {
-	m.repoHealth = make([]repoHealth, len(m.repos))
-	cmds := []tea.Cmd{loadReadOnly(m.c), loadBlobs(m.c)}
-	for i, r := range m.repos {
-		m.repoHealth[i] = repoHealth{name: r.Name}
-		cmds = append(cmds, loadRepoHealth(m.c, r.Name))
-	}
-	if len(m.repos) == 0 {
-		cmds = append(cmds, loadRepos(m.c))
-	}
-	return m, tea.Batch(cmds...)
+	return m, tea.Batch(loadChecks(m.c), loadReadOnly(m.c), loadBlobs(m.c))
 }
 
 func (m Model) adminLoad() tea.Cmd {
@@ -254,9 +255,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.err = ""
 			m.msg = ""
-		}
-		if m.screen == scrHealth {
-			return m.enterHealth()
 		}
 		return m, nil
 	case compsLoaded:
@@ -354,16 +352,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.roKnown = true
 		}
 		return m, nil
-	case repoHealthLoaded:
-		for i := range m.repoHealth {
-			if m.repoHealth[i].name == msg.name {
-				if msg.err != nil {
-					m.repoHealth[i].err = msg.err.Error()
-				} else {
-					m.repoHealth[i].st = msg.st
-				}
-				return m, nil
-			}
+	case checksLoaded:
+		m.checkSel = 0
+		if msg.err != nil {
+			m.err = msg.err.Error()
+		} else {
+			m.err = ""
+			m.checks = msg.checks
 		}
 		return m, nil
 	case tea.KeyMsg:
@@ -447,7 +442,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case scrAdminList:
 		return m.adminListKey(msg)
 	case scrHealth:
-		moveCursor(msg, len(m.repoHealth), &m.healthSel)
+		moveCursor(msg, len(m.checks), &m.checkSel)
 		return m, nil
 	}
 	return m, nil
@@ -781,36 +776,35 @@ func (m Model) viewAdminList(h int) string {
 	return ""
 }
 
-// viewHealth renders: server line, per-repo health list, storage summary.
+// viewHealth renders: server line, system status checks, storage summary.
 func (m Model) viewHealth(h int) string {
 	var b strings.Builder
 
 	// server line
 	ro := "unknown"
 	if m.roKnown {
-		ro = onOff(m.readOnly)
+		ro = onOff(m.readOnly.Frozen)
 	}
 	writes := okStyle.Render("writable")
 	if m.status != "writable" {
 		writes = errStyle.Render(m.status)
 	}
 	roField := "read-only: " + ro
-	if m.roKnown && m.readOnly {
+	if m.roKnown && m.readOnly.Frozen {
+		if m.readOnly.SummaryReason != "" {
+			roField += " (" + m.readOnly.SummaryReason + ")"
+		}
 		roField = errStyle.Render(roField)
 	}
 	b.WriteString(fmt.Sprintf("server: %s   %s", writes, roField))
 
-	// repo list gets the remaining rows minus storage section
-	list := window(m.repoHealth, m.healthSel, max(1, h-6), func(i int) string {
-		rh := m.repoHealth[i]
-		switch {
-		case rh.err != "":
-			return errStyle.Render("✗") + fmt.Sprintf("  %-20s %s", rh.name, trim(rh.err, 60))
-		case rh.st.Healthy:
-			return okStyle.Render("●") + fmt.Sprintf("  %-20s %s", rh.name, dimStyle.Render("healthy"))
-		default:
-			return errStyle.Render("●") + fmt.Sprintf("  %-20s %s", rh.name, trim(rh.st.Description, 60))
+	// system status checks get the remaining rows minus storage section
+	list := window(m.checks, m.checkSel, max(1, h-6), func(i int) string {
+		rh := m.checks[i]
+		if rh.st.Healthy {
+			return okStyle.Render("●") + fmt.Sprintf("  %-25s %s", rh.name, dimStyle.Render(trim(squashHTML(rh.st.Message), 60)))
 		}
+		return errStyle.Render("●") + fmt.Sprintf("  %-25s %s", rh.name, trim(squashHTML(rh.st.Message), 60))
 	})
 	b.WriteString("\n" + list)
 
@@ -818,12 +812,21 @@ func (m Model) viewHealth(h int) string {
 	b.WriteString("\n" + titleStyle.Render("storage"))
 	for _, bl := range m.blobs {
 		marker := okStyle.Render("●")
-		if bl.AvailableSpace < 1<<30 { // under 1 GiB
+		if bl.Unavailable || bl.AvailableSpace < 1<<30 { // unavailable or under 1 GiB
 			marker = errStyle.Render("●")
 		}
 		b.WriteString("\n" + fmt.Sprintf("%s %-20s %s free", marker, bl.Name, humanBytes(bl.AvailableSpace)))
 	}
 	return b.String()
+}
+
+// squashHTML flattens embedded HTML tags and collapse whitespace; Nexus
+// check messages contain <br>/<b> markup.
+func squashHTML(s string) string {
+	s = strings.ReplaceAll(s, "<br>", " ")
+	s = strings.ReplaceAll(s, "<b>", " ")
+	s = strings.ReplaceAll(s, "</b>", " ")
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func humanBytes(n int64) string {

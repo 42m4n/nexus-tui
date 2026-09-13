@@ -147,51 +147,73 @@ func TestSearchPassesFilters(t *testing.T) {
 	}
 }
 
-func TestRepoStatus(t *testing.T) {
+func TestBlobStores(t *testing.T) {
 	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/service/rest/v1/repositories/maven-central/status" {
+		if r.URL.Path != "/service/rest/v1/blobstores" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		w.Write([]byte(`{"healthy":false,"description":"Remote unavailable: connection timed out"}`))
+		w.Write([]byte(`[{"softQuota":null,"name":"default","type":"File","unavailable":false,"blobCount":0,"totalSizeInBytes":0,"availableSpaceInBytes":11523129344}]`))
 	}))
-	st, err := c.RepoStatus("maven-central")
+	bs, err := c.BlobStores()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Healthy || st.Description != "Remote unavailable: connection timed out" {
-		t.Fatalf("status = %+v", st)
+	if len(bs) != 1 || bs[0].AvailableSpace != 11523129344 || bs[0].TotalSize != 0 || bs[0].Unavailable {
+		t.Fatalf("blob stores = %+v", bs)
 	}
-	if _, err := c.RepoStatus(""); err == nil {
-		t.Fatal("expected error for empty repository")
+}
+
+func TestStatusChecks(t *testing.T) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/service/rest/v1/status/check" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.Write([]byte(`{
+			"Blob Stores Quota": {"healthy": true, "message": "0/12 blob stores violating their quota"},
+			"Available CPUs": {"healthy": false, "message": "The host is allocating 1 core"}
+		}`))
+	}))
+	m, err := c.StatusChecks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m) != 2 {
+		t.Fatalf("checks = %d, want 2", len(m))
+	}
+	if !m["Blob Stores Quota"].Healthy || m["Blob Stores Quota"].Message != "0/12 blob stores violating their quota" {
+		t.Fatalf("quota check = %+v", m["Blob Stores Quota"])
+	}
+	if m["Available CPUs"].Healthy || m["Available CPUs"].Message != "The host is allocating 1 core" {
+		t.Fatalf("cpu check = %+v", m["Available CPUs"])
 	}
 }
 
 func TestReadOnly(t *testing.T) {
-	t.Run("read-only mode off", func(t *testing.T) {
+	t.Run("unfrozen", func(t *testing.T) {
 		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path != "/service/rest/v1/read-only" {
 				t.Errorf("path = %s", r.URL.Path)
 			}
-			w.Write([]byte(`{"readOnly":false}`))
+			w.Write([]byte(`{"summaryReason":"","systemInitiated":false,"frozen":false}`))
 		}))
 		ro, err := c.ReadOnly()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if ro {
-			t.Fatal("readOnly = true, want false")
+		if ro.Frozen {
+			t.Fatal("frozen = true, want false")
 		}
 	})
-	t.Run("read-only mode on", func(t *testing.T) {
+	t.Run("frozen with reason", func(t *testing.T) {
 		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(`{"readOnly":true}`))
+			w.Write([]byte(`{"summaryReason":"db locked","systemInitiated":true,"frozen":true}`))
 		}))
 		ro, err := c.ReadOnly()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !ro {
-			t.Fatal("readOnly = false, want true")
+		if !ro.Frozen || ro.SummaryReason != "db locked" {
+			t.Fatalf("state = %+v", ro)
 		}
 	})
 }

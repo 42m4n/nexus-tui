@@ -72,18 +72,22 @@ type Privilege struct {
 type BlobStore struct {
 	Name           string `json:"name"`
 	Type           string `json:"type"`
+	Unavailable    bool   `json:"unavailable"`
 	BlobCount      int64  `json:"blobCount"`
-	TotalSize      int64  `json:"totalSize"`
-	AvailableSpace int64  `json:"availableSpace"`
+	TotalSize      int64  `json:"totalSizeInBytes"`
+	AvailableSpace int64  `json:"availableSpaceInBytes"`
 }
 
-type RepoStatus struct {
-	Healthy     bool   `json:"healthy"`
-	Description string `json:"description"`
+// CheckResult is one named system status check from /status/check.
+type CheckResult struct {
+	Healthy bool   `json:"healthy"`
+	Message string `json:"message"`
 }
 
-type ReadOnly struct {
-	ReadOnly bool `json:"readOnly"`
+// ReadOnlyState is the server-wide frozen state from /read-only.
+type ReadOnlyState struct {
+	Frozen        bool   `json:"frozen"`
+	SummaryReason string `json:"summaryReason"`
 }
 
 type page[T any] struct {
