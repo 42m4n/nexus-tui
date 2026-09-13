@@ -24,6 +24,7 @@ const (
 	scrAdmin
 	scrAdminList
 	scrHealth
+	scrSwitch
 )
 
 type adminKind int
@@ -36,10 +37,14 @@ const (
 )
 
 type Model struct {
-	c      *nexus.Client
-	status string
-	err    string
-	msg    string
+	c         *nexus.Client
+	clients   map[string]*nexus.Client
+	profile   string
+	profiles  []string
+	switchSel int
+	status    string
+	err       string
+	msg       string
 
 	screen screen
 	focus  int // 0 = left/top pane, 1 = right/detail pane
@@ -90,16 +95,26 @@ type confirmModal struct {
 	input  string
 }
 
-func New(c *nexus.Client) Model {
+func New(clients map[string]*nexus.Client, current string) Model {
 	ti := textinput.New()
 	ti.Placeholder = "name"
 	ti.CharLimit = 128
-	m := Model{
-		c:         c,
+	profiles := make([]string, 0, len(clients))
+	for name := range clients {
+		profiles = append(profiles, name)
+	}
+	sort.Strings(profiles)
+	if current == "" && len(profiles) > 0 {
+		current = profiles[0]
+	}
+	return Model{
+		c:         clients[current],
+		clients:   clients,
+		profile:   current,
+		profiles:  profiles,
 		query:     ti,
 		adminMenu: []string{"Users", "Roles", "Privileges", "Blob Stores"},
 	}
-	return m
 }
 
 func (m Model) Init() tea.Cmd {
@@ -375,10 +390,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch k {
 	case "ctrl+c", "q":
-		if m.screen == scrSearch && k == "q" {
+		if (m.screen == scrSearch || m.screen == scrSwitch) && k == "q" {
 			break
 		}
 		return m, tea.Quit
+	case "ctrl+p":
+		if len(m.profiles) < 2 {
+			return m, nil
+		}
+		m.switchSel = m.profileIndex()
+		m.screen = scrSwitch
+		m.query.Blur()
+		return m, nil
 	case "esc":
 		m.screen = scrBrowse
 		m.query.Blur()
@@ -444,6 +467,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case scrHealth:
 		moveCursor(msg, len(m.checks), &m.checkSel)
 		return m, nil
+	case scrSwitch:
+		return m.switchKey(msg)
 	}
 	return m, nil
 }
@@ -562,6 +587,49 @@ func (m Model) adminListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m Model) profileIndex() int {
+	for i, p := range m.profiles {
+		if p == m.profile {
+			return i
+		}
+	}
+	return 0
+}
+
+// switchKey drives the profile picker: enter switches, esc cancels.
+func (m Model) switchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	moveCursor(msg, len(m.profiles), &m.switchSel)
+	switch msg.String() {
+	case "enter", "l", "right":
+		return m.switchProfile(m.profiles[m.switchSel])
+	case "esc":
+		m.screen = scrBrowse
+	}
+	return m, nil
+}
+
+// switchProfile points the model at another instance, drops all cached
+// state, and reloads the browse screen.
+func (m Model) switchProfile(name string) (tea.Model, tea.Cmd) {
+	if name == m.profile {
+		m.screen = scrBrowse
+		return m, nil
+	}
+	m.c = m.clients[name]
+	m.profile = name
+	m.screen = scrBrowse
+	m.focus = 0
+	m.status, m.err, m.msg = "", "", ""
+	m.repos, m.comps = nil, nil
+	m.repoSel, m.compSel = 0, 0
+	m.tasks, m.taskSel = nil, 0
+	m.users, m.roles, m.privs, m.blobs = nil, nil, nil, nil
+	m.userSel, m.roleSel, m.privSel, m.blobSel = 0, 0, 0, 0
+	m.checks, m.checkSel = nil, 0
+	m.readOnly, m.roKnown = nexus.ReadOnlyState{}, false
+	return m, tea.Batch(loadStatus(m.c), loadRepos(m.c))
+}
+
 // moveCursor handles j/k/up/down; returns true if the list should consume the key.
 func moveCursor(msg tea.KeyMsg, n int, sel *int) bool {
 	if n == 0 {
@@ -625,6 +693,8 @@ func (m Model) View() string {
 		return m.viewAdminList(bodyH)
 	case scrHealth:
 		return m.viewHealth(bodyH)
+	case scrSwitch:
+		return m.viewSwitch(bodyH)
 	}
 	b.WriteString("\n")
 	b.WriteString(m.footer())
@@ -636,7 +706,7 @@ func (m Model) header() string {
 	if m.status != "writable" {
 		dot = errStyle.Render("●")
 	}
-	return fmt.Sprintf("%s Nexus TUI %s   status: %s   writes: %s", titleStyle.Render("NEXUS"), Version, m.status, onOff(m.c.Writes)) + "   " + dot
+	return fmt.Sprintf("%s Nexus TUI %s   %s   status: %s   writes: %s", titleStyle.Render("NEXUS"), Version, m.profile, m.status, onOff(m.c.Writes)) + "   " + dot
 }
 
 func onOff(b bool) string {
@@ -670,6 +740,8 @@ func (m Model) footer() string {
 		return "[j/k] move  [d] delete user  [r] refresh  [esc] back"
 	case scrHealth:
 		return "[j/k] move  [r] refresh  [esc] back  [q] quit"
+	case scrSwitch:
+		return "[j/k] move  [enter] switch  [esc] back"
 	}
 	return ""
 }
@@ -744,6 +816,16 @@ func (m Model) viewTasks(h int) string {
 
 func (m Model) viewAdmin(h int) string {
 	return window(m.adminMenu, m.adminSel, h-2, func(i int) string { return m.adminMenu[i] })
+}
+
+func (m Model) viewSwitch(h int) string {
+	list := window(m.profiles, m.switchSel, max(1, h-2), func(i int) string {
+		if m.profiles[i] == m.profile {
+			return m.profiles[i] + dimStyle.Render("  (current)")
+		}
+		return m.profiles[i]
+	})
+	return titleStyle.Render("Switch instance") + "\n" + list
 }
 
 func (m Model) viewAdminList(h int) string {

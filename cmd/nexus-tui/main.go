@@ -14,6 +14,23 @@ import (
 
 var version = "dev"
 
+// buildClients makes one client per profile that has a url.
+func buildClients(cfg config.Config, writes bool) (map[string]*nexus.Client, error) {
+	clients := map[string]*nexus.Client{}
+	for name, p := range cfg.Profiles {
+		if p.URL == "" {
+			continue
+		}
+		c, err := nexus.New(p.URL, p.Insecure, p.Username, p.Password, p.Token)
+		if err != nil {
+			return nil, fmt.Errorf("profile %s: %w", name, err)
+		}
+		c.Writes = writes
+		clients[name] = c
+	}
+	return clients, nil
+}
+
 func main() {
 	profile := flag.String("profile", "", "config profile name")
 	cfgPath := flag.String("config", "", "config file path (default ~/.config/nexus-tui/config.yaml)")
@@ -32,27 +49,30 @@ func main() {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
 	}
-	p, err := cfg.Select(*profile)
+	if *insecure {
+		for name, p := range cfg.Profiles {
+			p.Insecure = true
+			cfg.Profiles[name] = p
+		}
+	}
+	clients, err := buildClients(cfg, *allowWrites)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "config:", err)
 		os.Exit(1)
 	}
-	if p.URL == "" {
+	cur := *profile
+	if cur == "" {
+		cur = cfg.Current
+	}
+	if cur == "" {
+		cur = "env"
+	}
+	if _, ok := clients[cur]; !ok {
 		fmt.Fprintln(os.Stderr, "config: no url set; export NEXUS_URL or set url in config")
 		os.Exit(1)
 	}
-	if *insecure {
-		p.Insecure = true
-	}
 
-	c, err := nexus.New(p.URL, p.Insecure, p.Username, p.Password, p.Token)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	c.Writes = *allowWrites
-
-	m := ui.New(c)
+	m := ui.New(clients, cur)
 	prog := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
