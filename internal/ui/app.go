@@ -67,11 +67,12 @@ type Model struct {
 }
 
 type confirmModal struct {
-	active bool
-	prompt string
-	expect string
-	path   string
-	input  string
+	active     bool
+	prompt     string
+	expect     string
+	path       string
+	input      string
+	invalidate bool // true = invalidate cache instead of delete
 }
 
 func New(c *nexus.Client) Model {
@@ -160,6 +161,9 @@ func loadBlobs(c *nexus.Client) tea.Cmd {
 }
 func doDelete(c *nexus.Client, path string) tea.Cmd {
 	return func() tea.Msg { return actionDone{c.Delete(path)} }
+}
+func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
+	return func() tea.Msg { return actionDone{c.InvalidateCache(repo)} }
 }
 
 func (m Model) adminLoad() tea.Cmd {
@@ -318,6 +322,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "d":
 		return m.startDelete()
+	case "i":
+		return m.startInvalidate()
 	case "tab":
 		m.focus = 1 - m.focus
 		return m, nil
@@ -355,6 +361,9 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = "confirmation text did not match"
 			return m, nil
 		}
+		if m.confirm.invalidate {
+			return m, doInvalidateCache(m.c, m.confirm.expect)
+		}
 		return m, doDelete(m.c, m.confirm.path)
 	case "backspace":
 		if len(m.confirm.input) > 0 {
@@ -386,6 +395,24 @@ func (m Model) startDelete() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.err = "delete not available in this view"
+	return m, nil
+}
+
+func (m Model) startInvalidate() (tea.Model, tea.Cmd) {
+	if !m.c.Writes {
+		m.err = "writes disabled; restart with --allow-writes"
+		return m, nil
+	}
+	if m.screen == scrBrowse && len(m.repos) > 0 {
+		r := m.repos[m.repoSel]
+		if r.Type == "hosted" {
+			m.err = "hosted repositories have no cache"
+			return m, nil
+		}
+		m.confirm = confirmModal{active: true, prompt: "invalidate cache", expect: r.Name, invalidate: true}
+		return m, nil
+	}
+	m.err = "invalidate not available in this view"
 	return m, nil
 }
 
@@ -537,7 +564,7 @@ func (m Model) footer() string {
 	}
 	switch m.screen {
 	case scrBrowse:
-		return "[j/k] move  [enter] open  [tab] pane  [d] delete repo  [1-4] views  [r] refresh  [q] quit"
+		return "[j/k] move  [enter] open  [tab] pane  [d] delete repo  [i] inval cache  [1-4] views  [r] refresh  [q] quit"
 	case scrSearch:
 		return "type query  [enter] search  [esc] back  [2] focus"
 	case scrTasks:

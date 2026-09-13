@@ -191,3 +191,11 @@ func (c *Client) Delete(path string) error {
 	}
 	return c.do(http.MethodDelete, path, nil, nil)
 }
+
+// InvalidateCache flushes the cached metadata of a proxy/group repository.
+func (c *Client) InvalidateCache(repository string) error {
+	if !c.Writes {
+		return fmt.Errorf("writes are disabled; start with --allow-writes")
+	}
+	return c.do(http.MethodPost, "/repositories/"+repository+"/invalidate-cache", nil, nil)
+}

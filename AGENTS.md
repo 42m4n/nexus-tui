@@ -27,11 +27,11 @@
 - `screen` enum controls active view.
 - `focus` int toggles left/right panes in browse.
 - `window[T]` helper renders scrollable lists; cursor stays in viewport.
-- Confirm modal for all destructive actions; `esc` cancels, `enter` only when typed name matches target.
+- Confirm modal for all destructive/write actions (delete, invalidate cache); `esc` cancels, `enter` only when typed name matches target.
 
 ## Known simplifications (ponytail)
 
-- Full admin CRUD (create/update forms) deferred — only read views + repo/user delete in v1.
+- Full admin CRUD (create/update forms) deferred — only read views + repo/user delete + proxy/group cache invalidation in v1.
 - Component/asset delete deferred.
 - Artifact upload deferred.
 - Format-specific search fields (maven groupId, npm scope) deferred — generic name/version only.

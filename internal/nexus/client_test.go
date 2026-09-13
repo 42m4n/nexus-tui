@@ -104,6 +104,31 @@ func TestDeleteGuarded(t *testing.T) {
 	}
 }
 
+func TestInvalidateCache(t *testing.T) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("server must not be called without --allow-writes")
+	}))
+	if err := c.InvalidateCache("maven-central"); err == nil {
+		t.Fatal("expected write guard error")
+	}
+	c.Writes = true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s", r.Method)
+		}
+		if r.URL.Path != "/service/rest/v1/repositories/maven-central/invalidate-cache" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c2, _ := New(srv.URL, false, "", "", "")
+	c2.Writes = true
+	if err := c2.InvalidateCache("maven-central"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSearchPassesFilters(t *testing.T) {
 	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

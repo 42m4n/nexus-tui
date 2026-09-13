@@ -16,12 +16,12 @@ func main() {
 	profile := flag.String("profile", "", "config profile name")
 	cfgPath := flag.String("config", "", "config file path (default ~/.config/nexus-tui/config.yaml)")
 	insecure := flag.Bool("insecure", false, "skip TLS certificate verification")
-	allowWrites := flag.Bool("allow-writes", false, "enable destructive actions (delete repo/user)")
+	allowWrites := flag.Bool("allow-writes", false, "enable gated actions (delete repo/user, invalidate cache)")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("nexus-tui 0.1.0")
+		fmt.Println("nexus-tui 0.2.0")
 		return
 	}
 
