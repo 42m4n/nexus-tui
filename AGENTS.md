@@ -6,6 +6,7 @@
 - Charm stack for TUI: `bubbletea`, `lipgloss`, `bubbles`.
 - YAML config via `gopkg.in/yaml.v3` (one approved dep; prefer stdlib encoding/json for anything else).
 - HTTP client in `internal/nexus/client.go` — all Nexus API calls go through it.
+- Multi-instance: `main.go` builds one `*nexus.Client` per config profile; `ui.New(clients, current)` takes the map. `ctrl+p` opens the profile picker (`scrSwitch`); switching clears all cached state and reloads browse. Switching is session-only — never writes `current:` back to config.
 - Read-only by default; writes gated by `Client.Writes` flag + typed confirmation in UI.
 - Pagination uses continuation tokens; `getPage` caps at 1000 pages (ponytail: raise or stream if a repo ever exceeds ~100k items).
 
@@ -53,6 +54,7 @@
 - `screen` enum controls active view.
 - `focus` int toggles left/right panes in browse.
 - `window[T]` helper renders scrollable lists; cursor stays in viewport.
+- Screen-specific keys live in the `switch m.screen` at the bottom of `handleKey` (`scrSwitch` uses `switchKey`); global keys (`1-5`, `ctrl+p`, `d`, `i`, `r`) go in the top-level switch.
 - Confirm modal for destructive actions (delete); `esc` cancels, `enter` only when typed name matches target. Cache invalidation is gated by `Writes` but needs no confirmation (non-destructive).
 
 ## Known simplifications (ponytail)
@@ -64,3 +66,4 @@
 - No Windows/macOS cross-compile.
 - No Nexus Cloud support — self-hosted only.
 - Config is YAML via `gopkg.in/yaml.v3`; secrets live in env vars only, never in config files.
+- In-TUI profile editing (add/remove profiles) deferred — config stays hand-edited; switcher is read-only.

@@ -10,6 +10,7 @@ A read-mostly terminal UI for managing Nexus Repository 3. Built with Go + Bubbl
 - Admin read views: users, roles, privileges, blob stores
 - Gated deletes: repository + user, typed confirmation required
 - Gated cache invalidation for proxy/group repositories (no confirmation; cache re-populates on demand)
+- Multi-instance: `ctrl+p` switches between configured profiles at runtime
 - Config file + env overrides
 - `--insecure` for self-signed certs
 - Status header with writable/read-only indicator
@@ -39,7 +40,12 @@ profiles:
     url: https://nexus.example.com
     username: admin
     insecure: false
+  staging:
+    url: https://staging.nexus.example.com
+    username: admin
 ```
+
+Switch between profiles at runtime with `ctrl+p` (needs 2+ profiles with a `url`).
 
 Secrets (password/token) go in env only, never in config:
 
@@ -55,6 +61,7 @@ NEXUS_INSECURE=true
 | Key | Action |
 |---|---|
 | `1-5` | Switch view (Browse/Search/Tasks/Admin/Health) |
+| `ctrl+p` | Switch Nexus instance (profile) |
 | `j/k` or `up/down` | Move cursor |
 | `enter` | Select / open |
 | `tab` | Switch pane (browse) |
@@ -76,4 +83,4 @@ No integration tests — unit tests use `httptest` with recorded JSON fixtures. 
 
 ## License
 
-TODO
+MIT — see [LICENSE](LICENSE).
