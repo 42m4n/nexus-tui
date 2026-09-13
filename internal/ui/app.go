@@ -369,11 +369,14 @@ func (m Model) startDelete() (tea.Model, tea.Cmd) {
 	if m.screen == scrBrowse && len(m.repos) > 0 {
 		r := m.repos[m.repoSel]
 		m.confirm = confirmModal{active: true, prompt: "delete repository", expect: r.Name, path: "/repositories/" + r.Name}
+		return m, nil
 	}
 	if m.screen == scrAdminList && m.adminKind == "users" && len(m.users) > 0 {
 		u := m.users[m.userSel]
 		m.confirm = confirmModal{active: true, prompt: "delete user", expect: u.UserID, path: "/security/users/" + u.UserID}
+		return m, nil
 	}
+	m.err = "delete not available in this view"
 	return m, nil
 }
 
