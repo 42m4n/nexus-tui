@@ -551,13 +551,13 @@ func (m Model) footer() string {
 }
 
 func (m Model) viewBrowse(h int) string {
-	leftW := m.width/3 - 2
+	leftW := m.width / 3
 	if leftW < 20 {
 		leftW = 20
 	}
-	rightW := m.width - leftW - 6
-	if rightW < 20 {
-		rightW = 20
+	rightW := m.width - leftW
+	if rightW < 40 {
+		rightW = 40
 	}
 	rows := h - 2
 	if rows < 1 {
