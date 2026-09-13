@@ -565,7 +565,10 @@ func (m Model) viewBrowse(h int) string {
 	}
 	left := window(m.repos, m.repoSel, rows, func(i int) string {
 		r := m.repos[i]
-		return fmt.Sprintf("%s  %s/%s", r.Name, r.Format, r.Type)
+		if i > 0 && m.repos[i-1].Format != r.Format {
+			return fmt.Sprintf("[%s] %s  %s", r.Format, r.Name, r.Type)
+		}
+		return fmt.Sprintf("  %s  %s", r.Name, r.Type)
 	})
 	right := window(m.comps, m.compSel, rows, func(i int) string {
 		c := m.comps[i]
