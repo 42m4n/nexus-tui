@@ -260,3 +260,11 @@ func (c *Client) InvalidateCache(repository string) error {
 	}
 	return c.do(http.MethodPost, "/repositories/"+repository+"/invalidate-cache", nil, nil)
 }
+
+// RunTask executes a scheduled Nexus task.
+func (c *Client) RunTask(taskID string) error {
+	if !c.Writes {
+		return fmt.Errorf("writes are disabled; start with --allow-writes")
+	}
+	return c.do(http.MethodPost, "/tasks/"+taskID+"/run", nil, nil)
+}

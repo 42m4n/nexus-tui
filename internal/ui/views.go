@@ -405,6 +405,7 @@ func (m Model) viewHelp(bodyH int) string {
 		{"o / O", "sort column / reverse"},
 		{"r", "refresh current view"},
 		{"i", "invalidate cache (proxy/group)"},
+		{"t", "run task (tasks)"},
 		{"ctrl-d", "delete (repos, users; confirm)"},
 		{"e", "edit search query"},
 		{"ctrl+p", "switch server profile"},

@@ -151,6 +151,10 @@ type invalidateDone struct {
 	err  error
 	repo string
 }
+type taskRunDone struct {
+	err  error
+	name string
+}
 type readOnlyLoaded struct {
 	ro  nexus.ReadOnlyState
 	err error
@@ -203,6 +207,9 @@ func doDelete(c *nexus.Client, path string) tea.Cmd {
 }
 func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
 	return func() tea.Msg { return invalidateDone{c.InvalidateCache(repo), repo} }
+}
+func doRunTask(c *nexus.Client, id, name string) tea.Cmd {
+	return func() tea.Msg { return taskRunDone{c.RunTask(id), name} }
 }
 func loadReadOnly(c *nexus.Client) tea.Cmd {
 	return func() tea.Msg { ro, err := c.ReadOnly(); return readOnlyLoaded{ro, err} }
@@ -488,6 +495,15 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.msg = "cache invalidated: " + msg.repo
 		}
 		return m, nil
+	case taskRunDone:
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			m.msg = ""
+		} else {
+			m.err = ""
+			m.msg = "task started: " + msg.name
+		}
+		return m, nil
 	case readOnlyLoaded:
 		if msg.err == nil {
 			m.readOnly = msg.ro
@@ -592,6 +608,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.refresh()
 	case "r":
 		return m.refresh()
+	case "t":
+		return m.startRunTask()
 	case "o":
 		return m.cycleSort()
 	case "O":
@@ -878,6 +896,22 @@ func (m Model) startInvalidate() (tea.Model, tea.Cmd) {
 		}
 	}
 	m.err = "invalidate not available in this view (repos)"
+	return m, nil
+}
+
+func (m Model) startRunTask() (tea.Model, tea.Cmd) {
+	if !m.c.Writes {
+		m.err = "writes disabled; restart with --allow-writes"
+		return m, nil
+	}
+	if top := m.top(); top.kind == vTasks && len(m.tasks) > 0 {
+		if idx := m.selectedIndex(top); idx >= 0 {
+			t := m.tasks[idx]
+			m.err = ""
+			return m, doRunTask(m.c, t.ID, t.Name)
+		}
+	}
+	m.err = "run not available in this view (tasks)"
 	return m, nil
 }
 
