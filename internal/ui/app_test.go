@@ -216,3 +216,73 @@ func TestEscPopsCrumbs(t *testing.T) {
 		t.Errorf("stack len = %d, want 1", len(m.stack))
 	}
 }
+
+func TestAlertSchedulesClear(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.repos = []nexus.Repository{{Name: "repo-a"}}
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	s := next.(Model)
+	if s.err == "" {
+		t.Fatal("err = empty, want writes-disabled message")
+	}
+	if s.msgExpiry.IsZero() {
+		t.Error("msgExpiry = zero, want set")
+	}
+}
+
+func TestFilterBarLive(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.repos = []nexus.Repository{{Name: "maven-central"}, {Name: "npm-hosted"}}
+	m = sendStr(m, "/")
+	if m.barMode != barFilter {
+		t.Fatal("barMode != barFilter after /")
+	}
+	m = sendStr(m, "m")
+	if got := m.top().filter; got != "m" {
+		t.Errorf("live filter got %q, want %q", got, "m")
+	}
+	m = sendStr(m, "a")
+	m = sendStr(m, "v")
+	if got := m.top().filter; got != "mav" {
+		t.Errorf("live filter got %q, want %q", got, "mav")
+	}
+	if n := len(m.displayOrder(m.top())); n != 1 {
+		t.Errorf("got %d rows after live filter, want 1", n)
+	}
+	// esc clears the live filter
+	m = sendStr(m, "esc")
+	if got := m.top().filter; got != "" {
+		t.Errorf("filter after esc = %q, want empty", got)
+	}
+	if n := len(m.displayOrder(m.top())); n != 2 {
+		t.Errorf("got %d rows after esc, want 2", n)
+	}
+}
+
+func TestSearchDebounceFires(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barCmd
+	m.bar.SetValue("s")
+	m = sendStr(m, "enter") // :s opens search view, query focused
+	if got := topKind(m); got != vSearch {
+		t.Fatalf("top = %v, want vSearch", got)
+	}
+	m = sendStr(m, "maven") // typing bumps searchVer
+	if m.searchVer == 0 {
+		t.Fatal("searchVer = 0 after typing, want > 0")
+	}
+	tick := searchDebounceMsg{ver: m.searchVer, query: "maven"}
+	next, cmd := m.Update(tick)
+	if s := next.(Model); !s.loading {
+		t.Error("loading = false after debounce msg, want true")
+	} else if cmd == nil {
+		t.Error("cmd = nil after debounce msg, want searchComps")
+	}
+	stale := searchDebounceMsg{ver: m.searchVer - 1, query: "mav"}
+	if next, _ := m.Update(stale); next.(Model).loading {
+		t.Error("stale debounce msg triggered loading")
+	}
+}

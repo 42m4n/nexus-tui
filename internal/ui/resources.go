@@ -140,7 +140,7 @@ func (m Model) rows(k viewKind) [][]string {
 	case vRepos:
 		out := make([][]string, 0, len(m.repos))
 		for _, r := range m.repos {
-			out = append(out, []string{r.Name, r.Format, r.Type, trim(r.URL, 50)})
+			out = append(out, []string{r.Name, r.Format, r.Type, r.URL})
 		}
 		return out
 	case vComps:

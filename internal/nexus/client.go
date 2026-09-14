@@ -42,6 +42,18 @@ func New(rawURL string, insecure bool, username, password, token string) (*Clien
 	}, nil
 }
 
+// Host returns the hostname of the Nexus instance, for display in the UI.
+func (c *Client) Host() string {
+	if c == nil || c.base == "" {
+		return ""
+	}
+	u, err := url.Parse(c.base)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
 func (c *Client) auth(req *http.Request) {
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)

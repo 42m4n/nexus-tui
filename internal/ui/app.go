@@ -3,6 +3,7 @@ package ui
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,13 +22,14 @@ const (
 )
 
 type Model struct {
-	c        *nexus.Client
-	clients  map[string]*nexus.Client
-	profile  string
-	profiles []string
-	status   string
-	err      string
-	msg      string
+	c         *nexus.Client
+	clients   map[string]*nexus.Client
+	profile   string
+	profiles  []string
+	status    string
+	err       string
+	msg       string
+	msgExpiry time.Time
 
 	// stack is the crumbs trail; top is the current resource view.
 	stack []viewState
@@ -36,6 +38,9 @@ type Model struct {
 	barMode int
 	cmdHist []string
 	histIdx int
+
+	// searchVer cancels stale debounced searches.
+	searchVer int
 
 	// describe overlay content for the top vDescribe entry.
 	descTitle string
@@ -151,6 +156,11 @@ type readOnlyLoaded struct {
 type checksLoaded struct {
 	checks []checkRow
 	err    error
+}
+type clearAlertMsg struct{}
+type searchDebounceMsg struct {
+	ver   int
+	query string
 }
 
 // ---- commands ----
@@ -345,6 +355,19 @@ func (m *Model) selectedRepoName() string {
 // ---- update ----
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	before := m.err + "|" + m.msg
+	m2, cmd := m.update(msg)
+	s := m2.(Model)
+	if s.err+m.msg+s.msg != before && (s.err != "" || s.msg != "") {
+		s.msgExpiry = time.Now().Add(4 * time.Second)
+		if cmd == nil {
+			cmd = tea.Tick(4*time.Second+50*time.Millisecond, func(time.Time) tea.Msg { return clearAlertMsg{} })
+		}
+	}
+	return s, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -470,7 +493,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.checks = msg.checks
 		}
 		return m, nil
+	case clearAlertMsg:
+		if !m.msgExpiry.IsZero() && !time.Now().Before(m.msgExpiry) {
+			m.err, m.msg, m.msgExpiry = "", "", time.Time{}
+		}
+		return m, nil
+	case searchDebounceMsg:
+		if msg.ver == m.searchVer && msg.query != "" {
+			m.loading = true
+			return m, searchComps(m.c, msg.query)
+		}
+		return m, nil
 	case tea.KeyMsg:
+		if !m.msgExpiry.IsZero() && time.Since(m.msgExpiry) > 4*time.Second {
+			m.err, m.msg, m.msgExpiry = "", "", time.Time{}
+		}
 		return m.handleKey(msg)
 	}
 	return m, nil
@@ -494,7 +531,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Search edit mode: printable keys go to the query input.
+	// Search edit mode: printable keys go to the query input and trigger debounced search.
 	if m.top().kind == vSearch && m.query.Focused() {
 		switch msg.String() {
 		case "enter":
@@ -506,7 +543,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.query, cmd = m.query.Update(msg)
-		return m, cmd
+		m.searchVer++
+		ver, q := m.searchVer, m.query.Value()
+		debounceCmd := tea.Tick(300*time.Millisecond, func(time.Time) tea.Msg {
+			return searchDebounceMsg{ver: ver, query: q}
+		})
+		return m, tea.Batch(cmd, debounceCmd)
 	}
 
 	switch msg.String() {
@@ -678,6 +720,10 @@ func (m Model) openDescribe() (tea.Model, tea.Cmd) {
 func (m Model) handleBar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		if m.barMode == barFilter {
+			m.top().filter = "" // cancel live filter
+			m.top().sel = 0
+		}
 		m.barMode = barNone
 		m.bar.Blur()
 		m.histIdx = len(m.cmdHist)
@@ -735,6 +781,10 @@ func (m Model) handleBar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.bar, cmd = m.bar.Update(msg)
+	if m.barMode == barFilter {
+		m.top().filter = m.bar.Value()
+		m.top().sel = 0
+	}
 	return m, cmd
 }
 

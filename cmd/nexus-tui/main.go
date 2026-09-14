@@ -73,6 +73,7 @@ func main() {
 	}
 
 	m := ui.New(clients, cur)
+	ui.Version = version
 	prog := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)

@@ -31,7 +31,7 @@ func (m Model) View() string {
 	b.WriteString(m.crumbs())
 	b.WriteString("\n")
 
-	bodyH := m.height - 5
+	bodyH := m.height - 6 // room for header, crumbs, 2-line footer
 	if m.barMode != barNone {
 		bodyH--
 	}
@@ -53,6 +53,13 @@ func (m Model) View() string {
 }
 
 func (m Model) header() string {
+	ver := Version
+	ver = strings.TrimPrefix(ver, "v")
+	left := titleStyle.Render("NEXUS") + " " + dimStyle.Render(ver) + "  " + m.profile
+	if host := m.c.Host(); host != "" {
+		left += dimStyle.Render(" (" + host + ")")
+	}
+
 	dot := okStyle.Render("●")
 	if m.status != "writable" {
 		dot = errStyle.Render("●")
@@ -61,14 +68,20 @@ func (m Model) header() string {
 	if st == "" {
 		st = "…"
 	}
-	top := m.top()
-	title := top.title
-	if m.loading && (top.kind == vComps || top.kind == vSearch) {
-		title += " (loading...)"
+	writes := dimStyle.Render("writes:off")
+	if m.c.Writes {
+		writes = okStyle.Render("writes:on")
 	}
-	return fmt.Sprintf("%s Nexus %s %s %s %s",
-		titleStyle.Render("NEXUS"), m.profile, dot+st,
-		"writes:"+onOff(m.c.Writes), titleStyle.Render(trim(title, 30)))
+	right := fmt.Sprintf("%s %s  %s", dot, st, writes)
+	if m.loading {
+		right = dimStyle.Render("(loading...)") + "  " + right
+	}
+
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func (m Model) crumbs() string {
@@ -85,7 +98,11 @@ func (m Model) crumbs() string {
 		}
 	}
 	s := strings.Join(parts, dimStyle.Render(" > "))
-	if f := m.top().filter; f != "" {
+	top := m.top()
+	if n := m.rowCount(); n > 0 && top.kind != vDescribe {
+		s += dimStyle.Render(fmt.Sprintf(" (%d)", n))
+	}
+	if f := top.filter; f != "" {
 		s += dimStyle.Render("  /" + f)
 	}
 	return trim(s, max(1, m.width))
@@ -99,25 +116,27 @@ func onOff(b bool) string {
 }
 
 func (m Model) footer() string {
-	if m.err != "" {
-		return errStyle.Render(trim(m.err, m.width))
-	}
-	if m.confirm.active {
-		return fmt.Sprintf("%s %q -> type %q: [%s]  enter=confirm esc=cancel",
+	var status string
+	switch {
+	case m.confirm.active:
+		status = fmt.Sprintf("%s %q -> type %q: [%s]  enter=confirm esc=cancel",
 			errStyle.Render("CONFIRM"), m.confirm.prompt, m.confirm.expect, m.confirm.input)
+	case m.err != "":
+		status = errStyle.Render(trim(m.err, m.width))
+	case m.msg != "":
+		status = okStyle.Render(trim(m.msg, m.width))
 	}
-	if m.msg != "" {
-		return okStyle.Render(trim(m.msg, m.width))
-	}
+
 	keys := "[: cmd] [/ filter] [o sort] [d describe] [enter open] [esc back] [? help] [q quit]"
 	switch m.top().kind {
 	case vRepos:
-		keys = "[enter open] [d describe] [i inval-cache] [ctrl-d delete] " + keys
+		keys = "[i inval-cache] [ctrl-d delete] " + keys
 	case vSearch:
 		if m.query.Focused() {
-			return "[enter] search  [esc] stop editing"
+			keys = "type to search live  [esc] stop editing"
+		} else {
+			keys = "[e edit query] [enter describe] " + keys
 		}
-		keys = "[e edit query] [enter describe] " + keys
 	case vHealth:
 		keys = "[d describe] [r refresh] " + keys
 	case vCtx:
@@ -125,9 +144,14 @@ func (m Model) footer() string {
 	case vDescribe:
 		keys = "[j/k scroll] [esc back] [q quit]"
 	case vUsers:
-		keys = "[d describe] [ctrl-d delete] " + keys
+		keys = "[ctrl-d delete] " + keys
 	}
-	return dimStyle.Render(trim(keys, max(1, m.width)))
+	keyLine := dimStyle.Render(trim(keys, max(1, m.width)))
+
+	if status != "" {
+		return status + "\n" + keyLine
+	}
+	return "\n" + keyLine
 }
 
 func (m Model) viewBar() string {
@@ -235,9 +259,9 @@ func renderHeader(headers []string, widths []int, sortCol int, asc bool) string 
 }
 
 func (m Model) viewSearch(h int) string {
-	hint := dimStyle.Render("query: (e to edit, enter in edit mode searches)")
+	hint := dimStyle.Render("query: type to search live (esc stops editing)")
 	if m.query.Focused() {
-		hint = dimStyle.Render("editing query — enter searches, esc stops")
+		hint = dimStyle.Render("query: searching as you type...")
 	}
 	top := m.top()
 	return m.query.View() + "\n" + hint + "\n" + m.viewTable(top, h-2)
@@ -304,27 +328,63 @@ func (m Model) viewHealth(h int) string {
 	return b.String()
 }
 
+// viewHelp renders a bordered two-column overlay: keys left, commands right.
 func (m Model) viewHelp(bodyH int) string {
-	_ = bodyH
-	lines := []string{
-		titleStyle.Render("Keys"),
-		"  :            command (:repos :comp <r> :search :tasks :users :roles :privs :blobs :health :ctx)",
-		"  /            filter current view (regex), enter applies, esc clears bar",
-		"  enter        open (repos→components, ctx→switch) / describe row",
-		"  d / y        describe selected row",
-		"  o / O        cycle sort column / toggle direction",
-		"  r            refresh current view",
-		"  i            invalidate cache (proxy/group repo)",
-		"  ctrl-d       delete (repos, users; typed confirm, needs --allow-writes)",
-		"  e            edit search query (in search view)",
-		"  esc          back (pop crumbs)   ? help   q quit   ctrl+p contexts",
-		"",
-		titleStyle.Render("Commands"),
-		"  :repos | :comp <repo> | :search <q> | :tasks | :users | :roles | :privs | :blobs | :health | :ctx",
-		"  append /<filter> to pre-filter, e.g. :repos /maven",
-		"  :q quits. up/down recalls command history in : mode.",
+	keys := [][2]string{
+		{":", "open command bar"},
+		{"/", "filter rows live"},
+		{"enter", "open / drill in / switch"},
+		{"d / y", "describe selected row"},
+		{"o / O", "sort column / reverse"},
+		{"r", "refresh current view"},
+		{"i", "invalidate cache (proxy/group)"},
+		{"ctrl-d", "delete (repos, users; confirm)"},
+		{"e", "edit search query"},
+		{"ctrl+p", "switch server profile"},
+		{"esc", "back / close overlay"},
+		{"q", "quit"},
 	}
-	return strings.Join(lines, "\n")
+	cmds := [][2]string{
+		{":repos", "list repositories"},
+		{":comp <repo>", "list components in repo"},
+		{":search <q>", "search artifacts live"},
+		{":tasks", "show scheduled tasks"},
+		{":users", "list users"},
+		{":roles", "list roles"},
+		{":privs", "list privileges"},
+		{":blobs", "list blob stores"},
+		{":health", "system checks and storage"},
+		{":ctx", "switch server profile"},
+		{":q", "quit"},
+	}
+	keyW := 0
+	for _, kv := range keys {
+		if len(kv[0]) > keyW {
+			keyW = len(kv[0])
+		}
+	}
+	cmdW := 0
+	for _, cv := range cmds {
+		if len(cv[0]) > cmdW {
+			cmdW = len(cv[0])
+		}
+	}
+
+	inner := max(40, m.width-8)
+	colW := (inner - 6) / 2
+	keyLines := make([]string, 0, len(keys)+1)
+	keyLines = append(keyLines, titleStyle.Render("Keys"))
+	for _, kv := range keys {
+		keyLines = append(keyLines, trim(fmt.Sprintf("  %-*s  %s", keyW, kv[0], kv[1]), colW))
+	}
+	cmdLines := make([]string, 0, len(cmds)+1)
+	cmdLines = append(cmdLines, titleStyle.Render("Commands"))
+	for _, cv := range cmds {
+		cmdLines = append(cmdLines, trim(fmt.Sprintf("  %-*s  %s", cmdW, cv[0], cv[1]), colW))
+	}
+	body := lipgloss.JoinHorizontal(lipgloss.Top,
+		strings.Join(keyLines, "\n"), strings.Repeat(" ", 3), strings.Join(cmdLines, "\n"))
+	return tableBorder.Width(m.width - 2).Render(body)
 }
 
 // squashHTML flattens embedded HTML tags and collapse whitespace; Nexus
