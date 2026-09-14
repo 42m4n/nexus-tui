@@ -264,6 +264,61 @@ func TestFilterBarLive(t *testing.T) {
 	}
 }
 
+func TestTabCompletesCommand(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barCmd
+	m.bar.SetValue("rep")
+	m = sendKey(m, tea.KeyTab)
+	if got := m.bar.Value(); got != "repos" {
+		t.Errorf("bar = %q, want %q", got, "repos")
+	}
+}
+
+func TestTabCompletionPreservesArg(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barCmd
+	m.bar.SetValue("rep maven-extra")
+	m = sendKey(m, tea.KeyTab)
+	if got := m.bar.Value(); got != "repos maven-extra" {
+		t.Errorf("bar = %q, want %q", got, "repos maven-extra")
+	}
+}
+
+func TestTabNoMatchKeepsBar(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barCmd
+	m.bar.SetValue(":zzz")
+	m = sendKey(m, tea.KeyTab)
+	if got := m.bar.Value(); got != ":zzz" {
+		t.Errorf("bar = %q, want %q", got, ":zzz")
+	}
+}
+
+func TestTabAmbiguousKeepsBar(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barCmd
+	m.bar.SetValue("c")
+	m = sendKey(m, tea.KeyTab)
+	if got := m.bar.Value(); got != "c" {
+		t.Errorf("bar = %q, want %q", got, "c")
+	}
+}
+
+func TestTabFilterModeNoop(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.barMode = barFilter
+	m.bar.SetValue("mav")
+	m = sendKey(m, tea.KeyTab)
+	if got := m.bar.Value(); got != "mav" {
+		t.Errorf("bar = %q, want %q", got, "mav")
+	}
+}
+
 func TestSearchDebounceFires(t *testing.T) {
 	cs := testClients(t)
 	m := New(cs, "a")

@@ -392,7 +392,7 @@ func (m Model) viewHealth(h int) string {
 // viewHelp renders a bordered two-column overlay: keys left, commands right.
 func (m Model) viewHelp(bodyH int) string {
 	keys := [][2]string{
-		{":", "open command bar"},
+		{":", "open command bar (tab completes)"},
 		{"/", "filter rows live"},
 		{"enter", "open / drill in / switch"},
 		{"d / y", "describe selected row"},

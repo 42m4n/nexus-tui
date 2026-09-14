@@ -772,6 +772,22 @@ func (m Model) handleBar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		// :search <q> runs the query immediately.
 		return m.openCommand(kind, arg, filter)
+	case "tab":
+		// Complete the :command word; keep any trailing args. The bar value
+		// holds no leading ':' — the view renders that prefix.
+		if m.barMode == barCmd {
+			cmdStr := strings.TrimPrefix(m.bar.Value(), ":")
+			words := strings.SplitN(cmdStr, " ", 2)
+			if done := commandCompletion(words[0]); done != "" {
+				if len(words) > 1 {
+					m.bar.SetValue(done + " " + words[1])
+				} else {
+					m.bar.SetValue(done)
+				}
+				m.bar.CursorEnd()
+			}
+		}
+		return m, nil
 	case "up":
 		if m.barMode == barCmd && len(m.cmdHist) > 0 {
 			if m.histIdx > 0 {

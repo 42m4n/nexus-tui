@@ -46,6 +46,31 @@ func TestResolveAlias(t *testing.T) {
 	}
 }
 
+func TestCommandCompletion(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "unique short alias", input: "rep", want: "repos"},
+		{name: "search alias", input: "se", want: "search"},
+		{name: "already canonical no-op", input: "repos", want: ""},
+		{name: "no match", input: "zzz", want: ""},
+		{name: "empty", input: "", want: ""},
+		{name: "case insensitive", input: "HEA", want: "health"},
+		{name: "canonical command no-op", input: "comp", want: ""},
+		{name: "ambiguous prefix", input: "c", want: ""},
+		{name: "full alias canonicalizes", input: "checks", want: "health"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := commandCompletion(tc.input); got != tc.want {
+				t.Errorf("commandCompletion(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMatchFilter(t *testing.T) {
 	cells := []string{"maven-central", "proxy"}
 	cases := []struct {

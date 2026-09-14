@@ -66,6 +66,53 @@ func (k viewKind) defaultTitle() string {
 	return ""
 }
 
+// aliases maps every :command spelling to its view. resolveAlias and tab
+// completion share this table.
+var aliases = map[string]viewKind{
+	"repos": vRepos, "rep": vRepos, "repositories": vRepos, "repo": vRepos,
+	"comp": vComps, "comps": vComps, "components": vComps,
+	"search": vSearch, "find": vSearch, "s": vSearch,
+	"tasks": vTasks, "task": vTasks,
+	"users": vUsers, "user": vUsers,
+	"roles": vRoles, "role": vRoles,
+	"privs": vPrivs, "privileges": vPrivs, "priv": vPrivs,
+	"blobs": vBlobs, "blob": vBlobs, "stores": vBlobs, "blobstores": vBlobs,
+	"health": vHealth, "checks": vHealth, "status": vHealth,
+	"ctx": vCtx, "contexts": vCtx, "profiles": vCtx, "switch": vCtx,
+}
+
+// canonicalCmd is the preferred :command per view, used by tab completion.
+var canonicalCmd = map[viewKind]string{
+	vRepos: "repos", vComps: "comp", vSearch: "search", vTasks: "tasks",
+	vUsers: "users", vRoles: "roles", vPrivs: "privs", vBlobs: "blobs",
+	vHealth: "health", vCtx: "ctx",
+}
+
+// commandCompletion completes a :command prefix to the canonical command of
+// the one view whose aliases all match it ("rep" -> "repos", "checks" ->
+// "health"). Ambiguous prefixes spanning several views, no matches, and
+// already-canonical input all return "" (bar stays unchanged).
+func commandCompletion(prefix string) string {
+	prefix = strings.ToLower(strings.TrimSpace(prefix))
+	if prefix == "" {
+		return ""
+	}
+	var kind viewKind
+	found := false
+	for name, k := range aliases {
+		if strings.HasPrefix(name, prefix) {
+			if found && k != kind {
+				return ""
+			}
+			kind, found = k, true
+		}
+	}
+	if !found || canonicalCmd[kind] == prefix {
+		return ""
+	}
+	return canonicalCmd[kind]
+}
+
 // resolveAlias maps a :command to a view with an optional arg (repo, query)
 // and an optional /filter suffix, e.g. ":repos /maven".
 func resolveAlias(input string) (kind viewKind, arg, filter string, ok bool) {
@@ -82,29 +129,11 @@ func resolveAlias(input string) (kind viewKind, arg, filter string, ok bool) {
 	if len(f) > 1 {
 		arg = strings.Join(f[1:], " ")
 	}
-	switch strings.ToLower(f[0]) {
-	case "repos", "rep", "repositories", "repo":
-		return vRepos, "", filter, true
-	case "comp", "comps", "components":
-		return vComps, arg, filter, true
-	case "search", "find", "s":
-		return vSearch, arg, filter, true
-	case "tasks", "task":
-		return vTasks, "", filter, true
-	case "users", "user":
-		return vUsers, "", filter, true
-	case "roles", "role":
-		return vRoles, "", filter, true
-	case "privs", "privileges", "priv":
-		return vPrivs, "", filter, true
-	case "blobs", "blob", "stores", "blobstores":
-		return vBlobs, "", filter, true
-	case "health", "checks", "status":
-		return vHealth, "", filter, true
-	case "ctx", "contexts", "profiles", "switch":
-		return vCtx, "", filter, true
+	kind, ok = aliases[strings.ToLower(f[0])]
+	if !ok {
+		return vRepos, "", "", false
 	}
-	return vRepos, "", "", false
+	return kind, arg, filter, true
 }
 
 // columns returns the header labels for a view.
