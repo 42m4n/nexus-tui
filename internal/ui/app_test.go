@@ -206,6 +206,28 @@ func TestSortCycle(t *testing.T) {
 	}
 }
 
+func TestTasksColumnsAndRows(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.tasks = []nexus.Task{{
+		Name: "Cleanup", CurrentState: "WAITING", Type: "assetBlob.cleanup",
+		LastRun: "2026-09-14T15:00:00Z", LastRunResult: "OK", NextRun: "2026-09-14T15:30:00Z",
+	}}
+	cols := columns(vTasks)
+	for i, want := range []string{"LAST RUN", "RESULT"} {
+		if cols[3+i] != want {
+			t.Errorf("col %d = %q, want %q", 3+i, cols[3+i], want)
+		}
+	}
+	r := m.rows(vTasks)[0]
+	if r[3] != "2026-09-14T15:00:00Z" {
+		t.Errorf("last run = %q", r[3])
+	}
+	if r[4] != "OK" {
+		t.Errorf("result = %q, want OK", r[4])
+	}
+}
+
 func TestEscPopsCrumbs(t *testing.T) {
 	cs := testClients(t)
 	m := New(cs, "a")

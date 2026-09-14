@@ -212,6 +212,8 @@ func (m Model) footer() string {
 		keys = "[j/k scroll] [esc back] [q quit]"
 	case vUsers:
 		keys = "[ctrl-d delete] " + keys
+	case vTasks:
+		keys = "[t run] [r refresh] " + keys
 	}
 	keyLine := dimStyle.Render(trim(keys, max(1, m.width)))
 
@@ -296,6 +298,14 @@ func colorCell(kind viewKind, col int, cell string) string {
 			switch cell {
 			case "WAITING":
 				return warnStyle.Render(cell)
+			case "FAILED", "ERROR":
+				return errStyle.Render(cell)
+			}
+		}
+		if col == 4 {
+			switch cell {
+			case "OK":
+				return okStyle.Render(cell)
 			case "FAILED", "ERROR":
 				return errStyle.Render(cell)
 			}

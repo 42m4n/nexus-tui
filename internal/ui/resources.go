@@ -146,7 +146,7 @@ func columns(k viewKind) []string {
 	case vSearch:
 		return []string{"GROUP", "NAME", "VERSION", "REPOSITORY"}
 	case vTasks:
-		return []string{"NAME", "STATE", "TYPE", "NEXT RUN"}
+		return []string{"NAME", "STATE", "TYPE", "LAST RUN", "RESULT", "NEXT RUN"}
 	case vUsers:
 		return []string{"USERID", "EMAIL", "SOURCE", "STATUS"}
 	case vRoles:
@@ -187,7 +187,7 @@ func (m Model) rows(k viewKind) [][]string {
 	case vTasks:
 		out := make([][]string, 0, len(m.tasks))
 		for _, t := range m.tasks {
-			out = append(out, []string{trim(t.Name, 32), trim(t.CurrentState, 12), trim(t.Type, 25), trim(orDash(t.NextRun), 22)})
+			out = append(out, []string{trim(t.Name, 32), trim(t.CurrentState, 12), trim(t.Type, 25), trim(orDash(t.LastRun), 22), trim(orDash(t.LastRunResult), 10), trim(orDash(t.NextRun), 22)})
 		}
 		return out
 	case vUsers:
