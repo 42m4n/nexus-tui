@@ -13,7 +13,7 @@ A read-mostly terminal UI for managing Nexus Repository 3. Built with Go + Bubbl
 - Multi-instance: `ctrl+p` switches between configured profiles at runtime
 - Config file + env overrides
 - `--insecure` for self-signed certs
-- Status header with writable/read-only indicator
+- Rich status header: Nexus server version (`swagger.json` `info.version`, Cloudflare-safe), profile/host, writable/read-only + freeze reason, aggregated health checks (`ok/total`), blob-store health + total free space (graceful narrow degrade)
 
 ## Build
 
@@ -61,7 +61,7 @@ NEXUS_INSECURE=true
 | Key | Action |
 |---|---|
 | `:` | Command bar (`:repos`, `:comp <repo>`, `:search <q>`, `:tasks`, `:users`, `:roles`, `:privs`, `:blobs`, `:health`, `:ctx`, `:q`) |
-| `/` | Filter current view (regex), `enter` applies |
+| `/` | Live filter current view (regex) |
 | `enter` | Open (repos→components, ctx→switch) / describe row |
 | `d` / `y` | Describe selected row |
 | `o` / `O` | Cycle sort column / toggle direction |

@@ -15,7 +15,7 @@
 - Config: `~/.config/nexus-tui/config.yaml` (profile `prod`); run `./nexus-tui` against it for live testing.
 - Health screens worth checking there: `5` (status checks + blob stores), `1` (browse).
 - Drive the TUI headless via tmux: `tmux new-session -d -s nxt -x 120 -y 40 './nexus-tui'`, then `tmux send-keys -t nxt 5` and `tmux capture-pane -t nxt -p`.
-- Verify API shapes against the live server before writing types — swagger guesses caused two fixture bugs (see commit `67142c2`). No per-repo health endpoint exists on OSS Nexus; use `GET /v1/status/check` (needs `nexus:metrics:read`).
+- Verify API shapes against the live server before writing types — swagger guesses caused two fixture bugs (see commit `67142c2`). No per-repo health endpoint exists on OSS Nexus; use `GET /v1/status/check` (needs `nexus:metrics:read`). Server version via `GET /service/rest/swagger.json` `info.version` (unauthenticated) — `Server: Nexus/...` header is stripped by Cloudflare.
 - Never run write actions against the live instance (delete, invalidate) without explicit user request.
 
 ## Testing
@@ -51,7 +51,7 @@
 
 ## UI patterns (k9s-style)
 
-- `internal/ui/` split: `app.go` (Model, messages, Update, keys), `resources.go` (viewKind registry, aliases, rows, describe), `table.go` (regex filter, numeric-aware sort), `views.go` (header, crumbs, tables, help).
+- `internal/ui/` split: `app.go` (Model, messages, Update, keys), `resources.go` (viewKind registry, aliases, rows, describe), `table.go` (regex filter, numeric-aware sort), `views.go` (header, crumbs, tables, help). Header caches `nxVer`/`checks`/`readOnly`/`blobs` via `loadOverview` at `Init` + on profile switch; degrades to dim `nx:-` when unloaded and drops the storage segment first on narrow screens.
 - Navigation is a crumbs stack (`stack []viewState`); `enter` pushes (repos→components, any row→describe), `esc` pops. Per-view cursor/filter/sort live in `viewState`.
 - `:` opens the command bar (`resolveAlias` in `resources.go`); `/` filters the current view; `?` help overlay. `ctrl+p` = `:ctx` shortcut.
 - Keys: `d`/`y` describe, `ctrl+d` delete (typed confirm, `Writes`-gated), `o`/`O` sort cycle/toggle, `r` refresh. Search view is modal: `e` edits query, `esc` stops editing.
