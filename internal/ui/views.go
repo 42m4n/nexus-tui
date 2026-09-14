@@ -103,11 +103,17 @@ func (m Model) header() string {
 		okB := 0
 		var free int64
 		for _, b := range m.blobs {
-			free += b.AvailableSpace
 			if !b.Unavailable && b.AvailableSpace >= 1<<30 {
 				okB++
 			}
+			// File stores share a disk; AvailableSpace is the same
+			// free-space value per disk — summing double counts it.
+			// Take the max so the header matches the per-store rows.
+			if !b.Unavailable && b.AvailableSpace > free {
+				free = b.AvailableSpace
+			}
 		}
+		// ponytail: max(AvailableSpace) across File stores; upgrade to sum only Group stores if multi-disk deployments matter
 		mk := okStyle.Render
 		if okB < len(m.blobs) {
 			mk = errStyle.Render
