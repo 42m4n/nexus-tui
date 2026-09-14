@@ -56,21 +56,26 @@ NEXUS_PASS=secret
 NEXUS_INSECURE=true
 ```
 
-## Key bindings
+## Key bindings (k9s-style)
 
 | Key | Action |
 |---|---|
-| `1-5` | Switch view (Browse/Search/Tasks/Admin/Health) |
-| `ctrl+p` | Switch Nexus instance (profile) |
-| `j/k` or `up/down` | Move cursor |
-| `enter` | Select / open |
-| `tab` | Switch pane (browse) |
-| `/` | Focus search |
-| `d` | Delete (repo or user) |
+| `:` | Command bar (`:repos`, `:comp <repo>`, `:search <q>`, `:tasks`, `:users`, `:roles`, `:privs`, `:blobs`, `:health`, `:ctx`, `:q`) |
+| `/` | Filter current view (regex), `enter` applies |
+| `enter` | Open (repos→components, ctx→switch) / describe row |
+| `d` / `y` | Describe selected row |
+| `o` / `O` | Cycle sort column / toggle direction |
+| `e` | Edit search query (in search view) |
+| `j/k` or `up/down` | Move cursor (`g`/`G` first/last) |
+| `ctrl+d` | Delete (repo or user, typed confirm) |
 | `i` | Invalidate cache (proxy/group repo, immediate) |
 | `r` | Refresh |
-| `esc` | Back |
+| `ctrl+p` | Contexts (same as `:ctx`) |
+| `?` | Help overlay |
+| `esc` | Back (pop crumbs) |
 | `q` | Quit |
+
+Append `/<filter>` to pre-filter, e.g. `:repos /maven`. Legacy `1-5` shortcuts still work.
 
 ## Testing
 

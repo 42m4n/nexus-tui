@@ -49,12 +49,12 @@
 3. Add message + command in `internal/ui/app.go`.
 4. Add test case in `client_test.go`.
 
-## UI patterns
+## UI patterns (k9s-style)
 
-- `screen` enum controls active view.
-- `focus` int toggles left/right panes in browse.
-- `window[T]` helper renders scrollable lists; cursor stays in viewport.
-- Screen-specific keys live in the `switch m.screen` at the bottom of `handleKey` (`scrSwitch` uses `switchKey`); global keys (`1-5`, `ctrl+p`, `d`, `i`, `r`) go in the top-level switch.
+- `internal/ui/` split: `app.go` (Model, messages, Update, keys), `resources.go` (viewKind registry, aliases, rows, describe), `table.go` (regex filter, numeric-aware sort), `views.go` (header, crumbs, tables, help).
+- Navigation is a crumbs stack (`stack []viewState`); `enter` pushes (repos→components, any row→describe), `esc` pops. Per-view cursor/filter/sort live in `viewState`.
+- `:` opens the command bar (`resolveAlias` in `resources.go`); `/` filters the current view; `?` help overlay. `ctrl+p` = `:ctx` shortcut.
+- Keys: `d`/`y` describe, `ctrl+d` delete (typed confirm, `Writes`-gated), `o`/`O` sort cycle/toggle, `r` refresh. Search view is modal: `e` edits query, `esc` stops editing.
 - Confirm modal for destructive actions (delete); `esc` cancels, `enter` only when typed name matches target. Cache invalidation is gated by `Writes` but needs no confirmation (non-destructive).
 
 ## Known simplifications (ponytail)

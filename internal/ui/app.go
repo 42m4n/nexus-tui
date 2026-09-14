@@ -1,13 +1,11 @@
 package ui
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 
 	"nexus-tui/internal/nexus"
 )
@@ -15,63 +13,46 @@ import (
 // Version is set at build time: -ldflags "-X ui.Version=vX.Y.Z"
 var Version = "dev"
 
-type screen int
-
+// bar modes for the k9s-style : command and / filter inputs.
 const (
-	scrBrowse screen = iota
-	scrSearch
-	scrTasks
-	scrAdmin
-	scrAdminList
-	scrHealth
-	scrSwitch
-)
-
-type adminKind int
-
-const (
-	adminUsers adminKind = iota
-	adminRoles
-	adminPrivileges
-	adminBlobs
+	barNone = iota
+	barCmd
+	barFilter
 )
 
 type Model struct {
-	c         *nexus.Client
-	clients   map[string]*nexus.Client
-	profile   string
-	profiles  []string
-	switchSel int
-	status    string
-	err       string
-	msg       string
+	c        *nexus.Client
+	clients  map[string]*nexus.Client
+	profile  string
+	profiles []string
+	status   string
+	err      string
+	msg      string
 
-	screen screen
-	focus  int // 0 = left/top pane, 1 = right/detail pane
+	// stack is the crumbs trail; top is the current resource view.
+	stack []viewState
+	// bar is the shared : / input; barMode tells which.
+	bar     textinput.Model
+	barMode int
+	cmdHist []string
+	histIdx int
 
-	repos   []nexus.Repository
-	repoSel int
-	comps   []nexus.Component
-	compSel int
-	loading bool
+	// describe overlay content for the top vDescribe entry.
+	descTitle string
+	descLines []string
 
-	tasks   []nexus.Task
-	taskSel int
+	showHelp bool
+	loading  bool
 
-	adminMenu []string
-	adminSel  int
-	adminKind adminKind // users|roles|privileges|blobstores
-	users     []nexus.User
-	userSel   int
-	roles     []nexus.Role
-	roleSel   int
-	privs     []nexus.Privilege
-	privSel   int
-	blobs     []nexus.BlobStore
-	blobSel   int
+	repos []nexus.Repository
+	comps []nexus.Component
+	tasks []nexus.Task
+	users []nexus.User
+	roles []nexus.Role
+	privs []nexus.Privilege
+	blobs []nexus.BlobStore
 
 	checks   []checkRow
-	checkSel int
 	readOnly nexus.ReadOnlyState
 	roKnown  bool
 
@@ -99,6 +80,8 @@ func New(clients map[string]*nexus.Client, current string) Model {
 	ti := textinput.New()
 	ti.Placeholder = "name"
 	ti.CharLimit = 128
+	bar := textinput.New()
+	bar.CharLimit = 128
 	profiles := make([]string, 0, len(clients))
 	for name := range clients {
 		profiles = append(profiles, name)
@@ -108,12 +91,13 @@ func New(clients map[string]*nexus.Client, current string) Model {
 		current = profiles[0]
 	}
 	return Model{
-		c:         clients[current],
-		clients:   clients,
-		profile:   current,
-		profiles:  profiles,
-		query:     ti,
-		adminMenu: []string{"Users", "Roles", "Privileges", "Blob Stores"},
+		c:        clients[current],
+		clients:  clients,
+		profile:  current,
+		profiles: profiles,
+		stack:    []viewState{newView(vRepos, "repos")},
+		bar:      bar,
+		query:    ti,
 	}
 }
 
@@ -225,24 +209,137 @@ func loadChecks(c *nexus.Client) tea.Cmd {
 	}
 }
 
-// enterHealth fires the health screen loads: system status checks,
+// enterHealth fires the health loads: system status checks,
 // read-only state, and blob store space.
 func (m Model) enterHealth() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(loadChecks(m.c), loadReadOnly(m.c), loadBlobs(m.c))
 }
 
-func (m Model) adminLoad() tea.Cmd {
-	switch m.adminKind {
-	case adminUsers:
-		return loadUsers(m.c)
-	case adminRoles:
-		return loadRoles(m.c)
-	case adminPrivileges:
-		return loadPrivs(m.c)
-	case adminBlobs:
-		return loadBlobs(m.c)
+// ---- stack helpers ----
+
+// top returns the current view, ensuring the stack is never empty.
+func (m *Model) top() *viewState {
+	if len(m.stack) == 0 {
+		m.stack = append(m.stack, newView(vRepos, "repos"))
 	}
-	return nil
+	return &m.stack[len(m.stack)-1]
+}
+
+func (m *Model) push(v viewState) {
+	m.stack = append(m.stack, v)
+}
+
+func (m *Model) pop() {
+	if len(m.stack) > 1 {
+		m.stack = m.stack[:len(m.stack)-1]
+	}
+}
+
+// openCommand pushes the view for kind, wiring its loader and initial filter.
+// Repeating the current view refreshes instead of stacking duplicates.
+func (m Model) openCommand(kind viewKind, arg, filter string) (tea.Model, tea.Cmd) {
+	if top := m.top(); top.kind == kind && filter == "" {
+		switch kind {
+		case vComps:
+			if arg == "" || arg == top.repo {
+				return m.refresh()
+			}
+		case vSearch:
+			if arg == "" {
+				m.query.Focus()
+				return m, textinput.Blink
+			}
+		default:
+			if arg == "" {
+				return m.refresh()
+			}
+		}
+	}
+	switch kind {
+	case vRepos:
+		vs := newView(vRepos, "repos")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadRepos(m.c)
+	case vComps:
+		repo := arg
+		if repo == "" {
+			repo = m.selectedRepoName()
+		}
+		if repo == "" {
+			m.err = "usage: :comp <repository>"
+			return m, nil
+		}
+		vs := newView(vComps, repo)
+		vs.repo = repo
+		vs.filter = filter
+		m.push(vs)
+		m.loading = true
+		return m, loadComps(m.c, repo)
+	case vSearch:
+		vs := newView(vSearch, "search")
+		vs.filter = filter
+		m.push(vs)
+		m.query.Focus()
+		if arg != "" {
+			m.query.SetValue(arg)
+			m.loading = true
+			return m, searchComps(m.c, arg)
+		}
+		return m, textinput.Blink
+	case vTasks:
+		vs := newView(vTasks, "tasks")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadTasks(m.c)
+	case vUsers:
+		vs := newView(vUsers, "users")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadUsers(m.c)
+	case vRoles:
+		vs := newView(vRoles, "roles")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadRoles(m.c)
+	case vPrivs:
+		vs := newView(vPrivs, "privileges")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadPrivs(m.c)
+	case vBlobs:
+		vs := newView(vBlobs, "blobstores")
+		vs.filter = filter
+		m.push(vs)
+		return m, loadBlobs(m.c)
+	case vHealth:
+		vs := newView(vHealth, "health")
+		vs.filter = filter
+		m.push(vs)
+		return m.enterHealth()
+	case vCtx:
+		vs := newView(vCtx, "contexts")
+		vs.filter = filter
+		m.push(vs)
+		return m, nil
+	}
+	return m, nil
+}
+
+// selectedRepoName returns the selected repo on the repos view, if any.
+func (m *Model) selectedRepoName() string {
+	for i := len(m.stack) - 1; i >= 0; i-- {
+		if m.stack[i].kind == vRepos && len(m.repos) > 0 {
+			vs := &m.stack[i]
+			if idx := m.selectedIndex(vs); idx >= 0 {
+				return m.repos[idx].Name
+			}
+		}
+		if m.stack[i].kind == vComps && m.stack[i].repo != "" {
+			return m.stack[i].repo
+		}
+	}
+	return ""
 }
 
 // ---- update ----
@@ -274,8 +371,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case compsLoaded:
 		m.comps = msg.comps
-		m.compSel = 0
 		m.loading = false
+		if top := m.top(); top.kind == vComps || top.kind == vSearch {
+			top.sel = 0
+		}
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -294,7 +393,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case usersLoaded:
 		m.users = msg.users
-		m.userSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -304,7 +402,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case rolesLoaded:
 		m.roles = msg.roles
-		m.roleSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -314,7 +411,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case privsLoaded:
 		m.privs = msg.privs
-		m.privSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -324,7 +420,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case blobsLoaded:
 		m.blobs = msg.blobs
-		m.blobSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -339,10 +434,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.msg = ""
 			m.confirm = confirmModal{}
-			switch {
-			case m.screen == scrBrowse:
+			if m.top().kind == vRepos {
 				return m, loadRepos(m.c)
-			case m.adminKind == adminUsers:
+			}
+			if m.top().kind == vUsers {
 				return m, loadUsers(m.c)
 			}
 		}
@@ -368,7 +463,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case checksLoaded:
-		m.checkSel = 0
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		} else {
@@ -386,91 +480,262 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.confirm.active {
 		return m.handleConfirm(msg)
 	}
-	k := msg.String()
-
-	switch k {
-	case "ctrl+c", "q":
-		if (m.screen == scrSearch || m.screen == scrSwitch) && k == "q" {
-			break
+	if m.barMode != barNone {
+		return m.handleBar(msg)
+	}
+	if m.showHelp {
+		switch msg.String() {
+		case "esc", "?", "q":
+			m.showHelp = false
+			return m, nil
+		case "ctrl+c":
+			return m, tea.Quit
 		}
-		return m, tea.Quit
-	case "ctrl+p":
-		if len(m.profiles) < 2 {
+		return m, nil
+	}
+
+	// Search edit mode: printable keys go to the query input.
+	if m.top().kind == vSearch && m.query.Focused() {
+		switch msg.String() {
+		case "enter":
+			m.loading = true
+			return m, searchComps(m.c, m.query.Value())
+		case "esc":
+			m.query.Blur()
 			return m, nil
 		}
-		m.switchSel = m.profileIndex()
-		m.screen = scrSwitch
-		m.query.Blur()
-		return m, nil
-	case "esc":
-		m.screen = scrBrowse
-		m.query.Blur()
-		return m, nil
-	case "1":
-		m.screen = scrBrowse
-		m.query.Blur()
-		return m, nil
-	case "2":
-		m.screen = scrSearch
-		m.query.Focus()
-		return m, textinput.Blink
-	case "3":
-		m.screen = scrTasks
-		m.query.Blur()
-		return m, loadTasks(m.c)
-	case "4":
-		m.screen = scrAdmin
-		m.query.Blur()
-		return m, nil
-	case "5":
-		m.screen = scrHealth
-		m.query.Blur()
-		return m.enterHealth()
-	case "r":
-		switch m.screen {
-		case scrBrowse:
-			return m, loadRepos(m.c)
-		case scrTasks:
-			return m, loadTasks(m.c)
-		case scrAdminList:
-			return m, m.adminLoad()
-		case scrHealth:
-			return m.enterHealth()
-		}
-	case "d":
-		return m.startDelete()
-	case "i":
-		return m.startInvalidate()
-	case "tab":
-		m.focus = 1 - m.focus
-		return m, nil
+		var cmd tea.Cmd
+		m.query, cmd = m.query.Update(msg)
+		return m, cmd
 	}
 
-	switch m.screen {
-	case scrBrowse:
-		return m.browseKey(msg)
-	case scrSearch:
-		return m.searchKey(msg)
-	case scrTasks:
-		return m.listKey(msg, len(m.tasks), &m.taskSel)
-	case scrAdmin:
-		moveCursor(msg, len(m.adminMenu), &m.adminSel)
-		if msg.String() == "enter" || msg.String() == "right" || msg.String() == "l" {
-			kinds := []adminKind{adminUsers, adminRoles, adminPrivileges, adminBlobs}
-			m.adminKind = kinds[m.adminSel]
-			m.screen = scrAdminList
-			return m, m.adminLoad()
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "q":
+		return m, tea.Quit
+	case ":":
+		m.barMode = barCmd
+		m.bar.SetValue("")
+		m.bar.Focus()
+		return m, textinput.Blink
+	case "/":
+		m.barMode = barFilter
+		m.bar.SetValue(m.top().filter)
+		m.bar.Focus()
+		return m, textinput.Blink
+	case "?":
+		m.showHelp = true
+		return m, nil
+	case "ctrl+p":
+		return m.openCommand(vCtx, "", "")
+	case "esc":
+		m.query.Blur()
+		m.pop()
+		return m, nil
+	case "ctrl+r":
+		return m.refresh()
+	case "r":
+		return m.refresh()
+	case "o":
+		return m.cycleSort()
+	case "O":
+		if top := m.top(); top.kind != vDescribe {
+			top.sortAsc = !top.sortAsc
 		}
 		return m, nil
-	case scrAdminList:
-		return m.adminListKey(msg)
-	case scrHealth:
-		moveCursor(msg, len(m.checks), &m.checkSel)
+	case "ctrl+d":
+		return m.startDelete()
+	case "d", "y":
+		return m.openDescribe()
+	case "i":
+		return m.startInvalidate()
+	case "enter":
+		return m.activate()
+	case "e":
+		if m.top().kind == vSearch {
+			m.query.Focus()
+			return m, textinput.Blink
+		}
 		return m, nil
-	case scrSwitch:
-		return m.switchKey(msg)
+	// Legacy numeric shortcuts, kept working during the transition.
+	case "1":
+		return m.openCommand(vRepos, "", "")
+	case "2":
+		return m.openCommand(vSearch, "", "")
+	case "3":
+		return m.openCommand(vTasks, "", "")
+	case "4":
+		return m.openCommand(vUsers, "", "")
+	case "5":
+		return m.openCommand(vHealth, "", "")
+	}
+
+	moveCursor(msg, m.rowCount(), &m.top().sel)
+	return m, nil
+}
+
+// rowCount is the display row count of the current table view.
+func (m Model) rowCount() int {
+	top := m.top()
+	if top.kind == vDescribe {
+		return len(m.descLines)
+	}
+	return len(m.displayOrder(top))
+}
+
+func (m Model) refresh() (tea.Model, tea.Cmd) {
+	switch m.top().kind {
+	case vRepos:
+		return m, loadRepos(m.c)
+	case vComps:
+		if m.top().repo == "" {
+			return m, nil
+		}
+		m.loading = true
+		return m, loadComps(m.c, m.top().repo)
+	case vSearch:
+		m.loading = true
+		return m, searchComps(m.c, m.query.Value())
+	case vTasks:
+		return m, loadTasks(m.c)
+	case vUsers:
+		return m, loadUsers(m.c)
+	case vRoles:
+		return m, loadRoles(m.c)
+	case vPrivs:
+		return m, loadPrivs(m.c)
+	case vBlobs:
+		return m, loadBlobs(m.c)
+	case vHealth:
+		return m.enterHealth()
 	}
 	return m, nil
+}
+
+// cycleSort moves to the next sortable column.
+func (m Model) cycleSort() (tea.Model, tea.Cmd) {
+	top := m.top()
+	n := len(columns(top.kind))
+	if n == 0 {
+		return m, nil
+	}
+	if top.sortCol < 0 {
+		top.sortCol = 0
+		top.sortAsc = true
+	} else if top.sortCol < n-1 {
+		top.sortCol++
+	} else {
+		top.sortCol = -1 // back to server order
+	}
+	top.sel = clampSel(top.sel, len(m.displayOrder(top)))
+	return m, nil
+}
+
+// activate is enter on the current row: drill in, switch, or describe.
+func (m Model) activate() (tea.Model, tea.Cmd) {
+	top := m.top()
+	switch top.kind {
+	case vRepos:
+		if idx := m.selectedIndex(top); idx >= 0 {
+			repo := m.repos[idx].Name
+			vs := newView(vComps, repo)
+			vs.repo = repo
+			m.push(vs)
+			m.loading = true
+			return m, loadComps(m.c, repo)
+		}
+	case vCtx:
+		if idx := m.selectedIndex(top); idx >= 0 {
+			return m.switchProfile(m.profiles[idx])
+		}
+	case vDescribe:
+		return m, nil
+	default:
+		return m.openDescribe()
+	}
+	return m, nil
+}
+
+// openDescribe pushes a detail view for the selected row.
+func (m Model) openDescribe() (tea.Model, tea.Cmd) {
+	top := m.top()
+	if top.kind == vDescribe || top.kind == vCtx {
+		return m, nil
+	}
+	title, lines := m.describe(top)
+	if title == "" {
+		m.err = "nothing to describe"
+		return m, nil
+	}
+	vs := newView(vDescribe, title)
+	m.push(vs)
+	m.descTitle = title
+	m.descLines = lines
+	return m, nil
+}
+
+func (m Model) handleBar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.barMode = barNone
+		m.bar.Blur()
+		m.histIdx = len(m.cmdHist)
+		return m, nil
+	case "enter":
+		val := strings.TrimSpace(m.bar.Value())
+		mode := m.barMode
+		m.barMode = barNone
+		m.bar.Blur()
+		if mode == barFilter {
+			m.top().filter = val
+			m.top().sel = 0
+			return m, nil
+		}
+		if val == "" {
+			return m, nil
+		}
+		m.cmdHist = append(m.cmdHist, val)
+		m.histIdx = len(m.cmdHist)
+		if val == "q" || val == "quit" || val == "exit" {
+			return m, tea.Quit
+		}
+		kind, arg, filter, ok := resolveAlias(val)
+		if !ok {
+			m.err = "unknown command: " + val + "  (try :repos :tasks :users :health :ctx)"
+			return m, nil
+		}
+		// :comp without arg drills into the selected repo, like enter.
+		if kind == vComps && arg != "" && m.top().kind == vRepos {
+			if idx := m.selectedIndex(m.top()); idx >= 0 && arg == m.repos[idx].Name {
+				return m.activate()
+			}
+		}
+		// :search <q> runs the query immediately.
+		return m.openCommand(kind, arg, filter)
+	case "up":
+		if m.barMode == barCmd && len(m.cmdHist) > 0 {
+			if m.histIdx > 0 {
+				m.histIdx--
+			}
+			m.bar.SetValue(m.cmdHist[m.histIdx])
+		}
+		return m, nil
+	case "down":
+		if m.barMode == barCmd && len(m.cmdHist) > 0 {
+			if m.histIdx < len(m.cmdHist)-1 {
+				m.histIdx++
+				m.bar.SetValue(m.cmdHist[m.histIdx])
+			} else {
+				m.histIdx = len(m.cmdHist)
+				m.bar.SetValue("")
+			}
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.bar, cmd = m.bar.Update(msg)
+	return m, cmd
 }
 
 func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -503,130 +768,61 @@ func (m Model) startDelete() (tea.Model, tea.Cmd) {
 		m.err = "writes disabled; restart with --allow-writes"
 		return m, nil
 	}
-	if m.screen == scrBrowse && len(m.repos) > 0 {
-		r := m.repos[m.repoSel]
-		m.confirm = confirmModal{active: true, prompt: "delete repository", expect: r.Name, path: "/repositories/" + r.Name}
-		return m, nil
+	if top := m.top(); top.kind == vRepos && len(m.repos) > 0 {
+		if idx := m.selectedIndex(top); idx >= 0 {
+			r := m.repos[idx]
+			m.confirm = confirmModal{active: true, prompt: "delete repository", expect: r.Name, path: "/repositories/" + r.Name}
+			return m, nil
+		}
 	}
-	if m.screen == scrAdminList && m.adminKind == adminUsers && len(m.users) > 0 {
-		u := m.users[m.userSel]
-		m.confirm = confirmModal{active: true, prompt: "delete user", expect: u.UserID, path: "/security/users/" + u.UserID}
-		return m, nil
+	if top := m.top(); top.kind == vUsers && len(m.users) > 0 {
+		if idx := m.selectedIndex(top); idx >= 0 {
+			u := m.users[idx]
+			m.confirm = confirmModal{active: true, prompt: "delete user", expect: u.UserID, path: "/security/users/" + u.UserID}
+			return m, nil
+		}
 	}
-	m.err = "delete not available in this view"
+	m.err = "delete not available in this view (repos, users)"
 	return m, nil
 }
 
 func (m Model) startInvalidate() (tea.Model, tea.Cmd) {
-	if m.screen == scrBrowse && len(m.repos) > 0 {
-		r := m.repos[m.repoSel]
-		if r.Type == "hosted" {
-			m.err = "hosted repositories have no cache"
-			return m, nil
-		}
-		m.err = ""
-		return m, doInvalidateCache(m.c, r.Name)
-	}
-	m.err = "invalidate not available in this view"
-	return m, nil
-}
-
-func (m Model) browseKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.focus == 0 {
-		if cmd := moveCursor(msg, len(m.repos), &m.repoSel); cmd {
-			return m, nil
-		}
-		if msg.String() == "enter" || msg.String() == "l" || msg.String() == "right" {
-			if len(m.repos) > 0 {
-				m.focus = 1
-				m.loading = true
-				return m, loadComps(m.c, m.repos[m.repoSel].Name)
+	if top := m.top(); top.kind == vRepos && len(m.repos) > 0 {
+		if idx := m.selectedIndex(top); idx >= 0 {
+			r := m.repos[idx]
+			if r.Type == "hosted" {
+				m.err = "hosted repositories have no cache"
+				return m, nil
 			}
-		}
-		return m, nil
-	}
-	moveCursor(msg, len(m.comps), &m.compSel)
-	if msg.String() == "h" || msg.String() == "left" {
-		m.focus = 0
-	}
-	return m, nil
-}
-
-func (m Model) searchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "enter" {
-		m.loading = true
-		return m, searchComps(m.c, m.query.Value())
-	}
-	if msg.String() == "shift+tab" {
-		return m, nil
-	}
-	var cmd tea.Cmd
-	m.query, cmd = m.query.Update(msg)
-	return m, cmd
-}
-
-func (m Model) listKey(msg tea.KeyMsg, n int, sel *int) (tea.Model, tea.Cmd) {
-	moveCursor(msg, n, sel)
-	return m, nil
-}
-
-func (m Model) adminListKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch m.adminKind {
-	case adminUsers:
-		moveCursor(msg, len(m.users), &m.userSel)
-	case adminRoles:
-		moveCursor(msg, len(m.roles), &m.roleSel)
-	case adminPrivileges:
-		moveCursor(msg, len(m.privs), &m.privSel)
-	case adminBlobs:
-		moveCursor(msg, len(m.blobs), &m.blobSel)
-	}
-	if msg.String() == "left" || msg.String() == "h" || msg.String() == "esc" {
-		m.screen = scrAdmin
-	}
-	return m, nil
-}
-
-func (m Model) profileIndex() int {
-	for i, p := range m.profiles {
-		if p == m.profile {
-			return i
+			m.err = ""
+			return m, doInvalidateCache(m.c, r.Name)
 		}
 	}
-	return 0
-}
-
-// switchKey drives the profile picker: enter switches, esc cancels.
-func (m Model) switchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	moveCursor(msg, len(m.profiles), &m.switchSel)
-	switch msg.String() {
-	case "enter", "l", "right":
-		return m.switchProfile(m.profiles[m.switchSel])
-	case "esc":
-		m.screen = scrBrowse
-	}
+	m.err = "invalidate not available in this view (repos)"
 	return m, nil
 }
 
 // switchProfile points the model at another instance, drops all cached
-// state, and reloads the browse screen.
+// state, and reloads the repos view.
 func (m Model) switchProfile(name string) (tea.Model, tea.Cmd) {
 	if name == m.profile {
-		m.screen = scrBrowse
+		m.pop()
 		return m, nil
 	}
 	m.c = m.clients[name]
 	m.profile = name
-	m.screen = scrBrowse
-	m.focus = 0
+	m.stack = []viewState{newView(vRepos, "repos")}
 	m.status, m.err, m.msg = "", "", ""
 	m.repos, m.comps = nil, nil
-	m.repoSel, m.compSel = 0, 0
-	m.tasks, m.taskSel = nil, 0
+	m.tasks = nil
 	m.users, m.roles, m.privs, m.blobs = nil, nil, nil, nil
-	m.userSel, m.roleSel, m.privSel, m.blobSel = 0, 0, 0, 0
-	m.checks, m.checkSel = nil, 0
+	m.checks = nil
 	m.readOnly, m.roKnown = nexus.ReadOnlyState{}, false
+	m.descLines, m.descTitle = nil, ""
+	m.showHelp = false
+	m.barMode = barNone
+	m.query.Blur()
+	m.query.SetValue("")
 	return m, tea.Batch(loadStatus(m.c), loadRepos(m.c))
 }
 
@@ -654,328 +850,4 @@ func moveCursor(msg tea.KeyMsg, n int, sel *int) bool {
 		return true
 	}
 	return false
-}
-
-// ---- view ----
-
-var (
-	titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
-	selStyle   = lipgloss.NewStyle().Reverse(true)
-	dimStyle   = lipgloss.NewStyle().Faint(true)
-	errStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-	okStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	paneStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder())
-	activePane = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("12"))
-)
-
-func (m Model) View() string {
-	if m.width == 0 {
-		return "loading..."
-	}
-	var b strings.Builder
-	b.WriteString(m.header())
-	b.WriteString("\n")
-
-	bodyH := m.height - 4
-	if bodyH < 3 {
-		bodyH = 3
-	}
-	switch m.screen {
-	case scrBrowse:
-		b.WriteString(m.viewBrowse(bodyH))
-	case scrSearch:
-		b.WriteString(m.viewSearch(bodyH))
-	case scrTasks:
-		b.WriteString(m.viewTasks(bodyH))
-	case scrAdmin:
-		return m.viewAdmin(bodyH)
-	case scrAdminList:
-		return m.viewAdminList(bodyH)
-	case scrHealth:
-		return m.viewHealth(bodyH)
-	case scrSwitch:
-		return m.viewSwitch(bodyH)
-	}
-	b.WriteString("\n")
-	b.WriteString(m.footer())
-	return b.String()
-}
-
-func (m Model) header() string {
-	dot := okStyle.Render("●")
-	if m.status != "writable" {
-		dot = errStyle.Render("●")
-	}
-	return fmt.Sprintf("%s Nexus TUI %s   %s   status: %s   writes: %s", titleStyle.Render("NEXUS"), Version, m.profile, m.status, onOff(m.c.Writes)) + "   " + dot
-}
-
-func onOff(b bool) string {
-	if b {
-		return "on"
-	}
-	return "off"
-}
-
-func (m Model) footer() string {
-	if m.err != "" {
-		return errStyle.Render(trim(m.err, m.width))
-	}
-	if m.confirm.active {
-		return fmt.Sprintf("%s %q -> type %q: [%s]  enter=confirm esc=cancel",
-			errStyle.Render("CONFIRM"), m.confirm.prompt, m.confirm.expect, m.confirm.input)
-	}
-	if m.msg != "" {
-		return okStyle.Render(trim(m.msg, m.width))
-	}
-	switch m.screen {
-	case scrBrowse:
-		return "[j/k] move  [enter] open  [tab] pane  [d] delete repo  [i] inval cache  [1-4] views  [r] refresh  [q] quit"
-	case scrSearch:
-		return "type query  [enter] search  [esc] back  [2] focus"
-	case scrTasks:
-		return "[j/k] move  [r] refresh  [esc] back  [q] quit"
-	case scrAdmin:
-		return "[j/k] move  [enter] open  [esc] back"
-	case scrAdminList:
-		return "[j/k] move  [d] delete user  [r] refresh  [esc] back"
-	case scrHealth:
-		return "[j/k] move  [r] refresh  [esc] back  [q] quit"
-	case scrSwitch:
-		return "[j/k] move  [enter] switch  [esc] back"
-	}
-	return ""
-}
-
-func (m Model) viewBrowse(h int) string {
-	leftW := m.width / 3
-	if leftW < 20 {
-		leftW = 20
-	}
-	rightW := m.width - leftW
-	if rightW < 40 {
-		rightW = 40
-	}
-	rows := h - 2
-	if rows < 1 {
-		rows = 1
-	}
-	left := window(m.repos, m.repoSel, rows, func(i int) string {
-		r := m.repos[i]
-		if i > 0 && m.repos[i-1].Format != r.Format {
-			return fmt.Sprintf("[%s] %s  %s", r.Format, r.Name, r.Type)
-		}
-		return fmt.Sprintf("  %s  %s", r.Name, r.Type)
-	})
-	right := window(m.comps, m.compSel, rows, func(i int) string {
-		c := m.comps[i]
-		return fmt.Sprintf("%s : %s : %s", c.Group, c.Name, c.Version)
-	})
-	lt, rt := "Repositories", "Components"
-	if m.loading {
-		rt += " (loading...)"
-	}
-	leftBox := pane(m.focus == 0, lt, left, leftW, h)
-	rightBox := pane(m.focus == 1, rt, right, rightW, h)
-	out := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
-	if m.focus == 1 && len(m.comps) > 0 {
-		c := m.comps[m.compSel]
-		out += "\n" + dimStyle.Render(fmt.Sprintf("assets: %d  id: %s", len(c.Assets), trim(c.ID, 40)))
-	}
-	return out
-}
-
-func (m Model) viewSearch(h int) string {
-	rows := h - 3
-	if rows < 1 {
-		rows = 1
-	}
-	list := window(m.comps, m.compSel, rows, func(i int) string {
-		c := m.comps[i]
-		return fmt.Sprintf("%s : %s : %s  (%s)", c.Group, c.Name, c.Version, c.Repository)
-	})
-	return m.query.View() + "\n" + list
-}
-
-func (m Model) viewTasks(h int) string {
-	rows := h - 2
-	if rows < 1 {
-		rows = 1
-	}
-	list := window(m.tasks, m.taskSel, rows, func(i int) string {
-		t := m.tasks[i]
-		return fmt.Sprintf("%-30s %-12s %s", t.Name, t.CurrentState, t.Type)
-	})
-	out := list
-	if len(m.tasks) > 0 {
-		t := m.tasks[m.taskSel]
-		out += "\n" + dimStyle.Render(fmt.Sprintf("last run: %s  result: %s  next: %s",
-			orDash(t.LastRun), orDash(t.LastRunResult), orDash(t.NextRun)))
-	}
-	return out
-}
-
-func (m Model) viewAdmin(h int) string {
-	return window(m.adminMenu, m.adminSel, h-2, func(i int) string { return m.adminMenu[i] })
-}
-
-func (m Model) viewSwitch(h int) string {
-	list := window(m.profiles, m.switchSel, max(1, h-2), func(i int) string {
-		if m.profiles[i] == m.profile {
-			return m.profiles[i] + dimStyle.Render("  (current)")
-		}
-		return m.profiles[i]
-	})
-	return titleStyle.Render("Switch instance") + "\n" + list
-}
-
-func (m Model) viewAdminList(h int) string {
-	rows := h - 2
-	if rows < 1 {
-		rows = 1
-	}
-	switch m.adminKind {
-	case adminUsers:
-		return window(m.users, m.userSel, rows, func(i int) string {
-			u := m.users[i]
-			return fmt.Sprintf("%-20s %-30s %s", u.UserID, u.Email, u.Source)
-		})
-	case adminRoles:
-		return window(m.roles, m.roleSel, rows, func(i int) string {
-			r := m.roles[i]
-			return fmt.Sprintf("%-25s %s", r.Name, trim(r.Description, 60))
-		})
-	case adminPrivileges:
-		return window(m.privs, m.privSel, rows, func(i int) string {
-			p := m.privs[i]
-			return fmt.Sprintf("%-30s %-20s %s", p.Name, p.Type, trim(p.Description, 50))
-		})
-	case adminBlobs:
-		return window(m.blobs, m.blobSel, rows, func(i int) string {
-			b := m.blobs[i]
-			return fmt.Sprintf("%-20s %-8s blobs:%d size:%d", b.Name, b.Type, b.BlobCount, b.TotalSize)
-		})
-	}
-	return ""
-}
-
-// viewHealth renders: server line, system status checks, storage summary.
-func (m Model) viewHealth(h int) string {
-	var b strings.Builder
-
-	// server line
-	ro := "unknown"
-	if m.roKnown {
-		ro = onOff(m.readOnly.Frozen)
-	}
-	writes := okStyle.Render("writable")
-	if m.status != "writable" {
-		writes = errStyle.Render(m.status)
-	}
-	roField := "read-only: " + ro
-	if m.roKnown && m.readOnly.Frozen {
-		if m.readOnly.SummaryReason != "" {
-			roField += " (" + m.readOnly.SummaryReason + ")"
-		}
-		roField = errStyle.Render(roField)
-	}
-	b.WriteString(fmt.Sprintf("server: %s   %s", writes, roField))
-
-	// system status checks get the remaining rows minus storage section
-	list := window(m.checks, m.checkSel, max(1, h-6), func(i int) string {
-		rh := m.checks[i]
-		if rh.st.Healthy {
-			return okStyle.Render("●") + fmt.Sprintf("  %-25s %s", rh.name, dimStyle.Render(trim(squashHTML(rh.st.Message), 60)))
-		}
-		return errStyle.Render("●") + fmt.Sprintf("  %-25s %s", rh.name, trim(squashHTML(rh.st.Message), 60))
-	})
-	b.WriteString("\n" + list)
-
-	// storage: one line per blob store
-	b.WriteString("\n" + titleStyle.Render("storage"))
-	for _, bl := range m.blobs {
-		marker := okStyle.Render("●")
-		if bl.Unavailable || bl.AvailableSpace < 1<<30 { // unavailable or under 1 GiB
-			marker = errStyle.Render("●")
-		}
-		b.WriteString("\n" + fmt.Sprintf("%s %-20s %s free", marker, bl.Name, humanBytes(bl.AvailableSpace)))
-	}
-	return b.String()
-}
-
-// squashHTML flattens embedded HTML tags and collapse whitespace; Nexus
-// check messages contain <br>/<b> markup.
-func squashHTML(s string) string {
-	s = strings.ReplaceAll(s, "<br>", " ")
-	s = strings.ReplaceAll(s, "<b>", " ")
-	s = strings.ReplaceAll(s, "</b>", " ")
-	return strings.Join(strings.Fields(s), " ")
-}
-
-func humanBytes(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GiB", float64(n)/(1<<30))
-	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MiB", float64(n)/(1<<20))
-	case n >= 1<<10:
-		return fmt.Sprintf("%.1f KiB", float64(n)/(1<<10))
-	default:
-		return fmt.Sprintf("%d B", n)
-	}
-}
-
-// window renders a scrollable, selectable list of n rows.
-// ponytail: full-slice render with a simple offset; fine for thousands of rows, paginate if lists get huge.
-func window[T any](items []T, sel, rows int, render func(int) string) string {
-	if len(items) == 0 {
-		return dimStyle.Render("(empty)")
-	}
-	if rows > len(items) {
-		rows = len(items)
-	}
-	start := 0
-	if sel >= rows {
-		start = sel - rows + 1
-	}
-	if start+rows > len(items) {
-		start = len(items) - rows
-	}
-	var b strings.Builder
-	for i := start; i < start+rows && i < len(items); i++ {
-		line := render(i)
-		if i == sel {
-			line = selStyle.Render(line)
-		}
-		b.WriteString(line)
-		if i < start+rows-1 {
-			b.WriteString("\n")
-		}
-	}
-	return b.String()
-}
-
-func pane(active bool, title, body string, w, h int) string {
-	st := paneStyle
-	if active {
-		st = activePane
-	}
-	content := titleStyle.Render(title) + "\n" + body
-	return st.Width(w).Height(h - 2).Render(content)
-}
-
-func trim(s string, n int) string {
-	if n <= 0 || len(s) <= n {
-		return s
-	}
-	if n <= 3 {
-		return s[:n]
-	}
-	return s[:n-3] + "..."
-}
-
-func orDash(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return s
 }
