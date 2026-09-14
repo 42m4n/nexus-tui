@@ -61,6 +61,8 @@ type Model struct {
 	readOnly nexus.ReadOnlyState
 	roKnown  bool
 
+	nxVer string // server product version, "" until loaded or failed
+
 	query textinput.Model
 
 	confirm confirmModal
@@ -107,7 +109,7 @@ func New(clients map[string]*nexus.Client, current string) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadStatus(m.c), loadRepos(m.c))
+	return tea.Batch(loadStatus(m.c), loadRepos(m.c), loadOverview(m.c))
 }
 
 // ---- messages ----
@@ -162,6 +164,7 @@ type searchDebounceMsg struct {
 	ver   int
 	query string
 }
+type versionLoaded struct{ version string }
 
 // ---- commands ----
 
@@ -203,6 +206,16 @@ func doInvalidateCache(c *nexus.Client, repo string) tea.Cmd {
 }
 func loadReadOnly(c *nexus.Client) tea.Cmd {
 	return func() tea.Msg { ro, err := c.ReadOnly(); return readOnlyLoaded{ro, err} }
+}
+func loadVersion(c *nexus.Client) tea.Cmd {
+	return func() tea.Msg { v, _ := c.ServerVersion(); return versionLoaded{v} } // ponytail: silent fallback to "nx:-" on failure
+}
+
+// loadOverview fires the header background loads: system checks, read-only
+// state, blob stores, and server version. All tolerate errors; the header
+// degrades to "n/a" instead of showing an error.
+func loadOverview(c *nexus.Client) tea.Cmd {
+	return tea.Batch(loadChecks(c), loadReadOnly(c), loadBlobs(c), loadVersion(c))
 }
 func loadChecks(c *nexus.Client) tea.Cmd {
 	return func() tea.Msg {
@@ -443,11 +456,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case blobsLoaded:
 		m.blobs = msg.blobs
-		if msg.err != nil {
+		if msg.err != nil && (m.top().kind == vBlobs || m.top().kind == vHealth) {
 			m.err = msg.err.Error()
-		} else {
+		} else if msg.err == nil {
 			m.err = ""
-			m.msg = ""
 		}
 		return m, nil
 	case actionDone:
@@ -477,20 +489,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case readOnlyLoaded:
-		if msg.err != nil {
-			m.err = msg.err.Error()
-		} else {
-			m.err = ""
+		if msg.err == nil {
 			m.readOnly = msg.ro
 			m.roKnown = true
+		} else if m.top().kind == vHealth {
+			m.err = msg.err.Error() // only the health view consumes this directly
 		}
 		return m, nil
+	case versionLoaded:
+		m.nxVer = msg.version
+		return m, nil
 	case checksLoaded:
-		if msg.err != nil {
-			m.err = msg.err.Error()
-		} else {
-			m.err = ""
+		if msg.err == nil {
 			m.checks = msg.checks
+		} else if m.top().kind == vHealth {
+			m.err = msg.err.Error() // only the health view consumes this directly
 		}
 		return m, nil
 	case clearAlertMsg:
@@ -868,12 +881,13 @@ func (m Model) switchProfile(name string) (tea.Model, tea.Cmd) {
 	m.users, m.roles, m.privs, m.blobs = nil, nil, nil, nil
 	m.checks = nil
 	m.readOnly, m.roKnown = nexus.ReadOnlyState{}, false
+	m.nxVer = ""
 	m.descLines, m.descTitle = nil, ""
 	m.showHelp = false
 	m.barMode = barNone
 	m.query.Blur()
 	m.query.SetValue("")
-	return m, tea.Batch(loadStatus(m.c), loadRepos(m.c))
+	return m, tea.Batch(loadStatus(m.c), loadRepos(m.c), loadOverview(m.c))
 }
 
 // moveCursor handles j/k/up/down; returns true if the list should consume the key.

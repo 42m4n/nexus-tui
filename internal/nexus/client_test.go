@@ -227,3 +227,37 @@ func TestErrorIncludesStatus(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
+
+func TestServerVersion(t *testing.T) {
+	t.Run("parses swagger info.version", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/service/rest/swagger.json" {
+				t.Errorf("path = %s", r.URL.Path)
+			}
+			w.Write([]byte(`{"swagger":"2.0","info":{"version":"3.86.2-01","title":"Nexus Repository Manager REST API"}}`))
+		}))
+		v, err := c.ServerVersion()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != "3.86.2-01" {
+			t.Errorf("version = %q, want %q", v, "3.86.2-01")
+		}
+	})
+	t.Run("missing version", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"info":{"title":"no version here"}}`))
+		}))
+		if _, err := c.ServerVersion(); err == nil {
+			t.Error("err = nil, want missing-version error")
+		}
+	})
+	t.Run("http error", func(t *testing.T) {
+		c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "boom", http.StatusInternalServerError)
+		}))
+		if _, err := c.ServerVersion(); err == nil {
+			t.Error("err = nil, want http error")
+		}
+	})
+}

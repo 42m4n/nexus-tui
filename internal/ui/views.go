@@ -52,32 +52,93 @@ func (m Model) View() string {
 	return b.String()
 }
 
+// header renders the one-line instance banner. On narrow screens the right
+// side drops the storage segment first, then writes, so profile, server
+// version, and health stay visible as long as possible.
 func (m Model) header() string {
-	ver := Version
-	ver = strings.TrimPrefix(ver, "v")
+	ver := strings.TrimPrefix(Version, "v")
 	left := titleStyle.Render("NEXUS") + " " + dimStyle.Render(ver) + "  " + m.profile
 	if host := m.c.Host(); host != "" {
 		left += dimStyle.Render(" (" + host + ")")
 	}
+	nx := "nx:" + orDash(m.nxVer)
+	if m.nxVer == "" {
+		nx = dimStyle.Render(nx)
+	}
+	left += "  " + nx
 
+	// health: x/y checks ok; dot red if any check failed
 	dot := okStyle.Render("●")
-	if m.status != "writable" {
+	st := orDash(m.status)
+	if m.status != "" && m.status != "writable" {
 		dot = errStyle.Render("●")
 	}
-	st := m.status
-	if st == "" {
-		st = "…"
+	if len(m.checks) > 0 {
+		ok := 0
+		for _, c := range m.checks {
+			if c.st.Healthy {
+				ok++
+			}
+		}
+		chk := fmt.Sprintf("checks:%d/%d", ok, len(m.checks))
+		if ok == len(m.checks) {
+			st += " " + okStyle.Render(chk)
+		} else {
+			st += " " + errStyle.Render(chk)
+			dot = errStyle.Render("●")
+		}
 	}
+	if m.roKnown && m.readOnly.Frozen {
+		ro := "RO:frozen"
+		if r := m.readOnly.SummaryReason; r != "" {
+			ro += "(" + trim(squashHTML(r), 20) + ")"
+		}
+		st += " " + errStyle.Render(ro)
+		dot = errStyle.Render("●")
+	}
+
+	// storage: ok blobs / total free space
+	var segStorage string
+	if len(m.blobs) > 0 {
+		okB := 0
+		var free int64
+		for _, b := range m.blobs {
+			free += b.AvailableSpace
+			if !b.Unavailable && b.AvailableSpace >= 1<<30 {
+				okB++
+			}
+		}
+		mk := okStyle.Render
+		if okB < len(m.blobs) {
+			mk = errStyle.Render
+		}
+		segStorage = mk(fmt.Sprintf("blobs:%d/%d %s free", okB, len(m.blobs), humanBytes(free)))
+	}
+
 	writes := dimStyle.Render("writes:off")
 	if m.c.Writes {
 		writes = okStyle.Render("writes:on")
 	}
-	right := fmt.Sprintf("%s %s  %s", dot, st, writes)
+	right := fmt.Sprintf("%s %s", dot, st)
+	if segStorage != "" {
+		right += "  " + segStorage
+	}
+	right += "  " + writes
 	if m.loading {
 		right = dimStyle.Render("(loading...)") + "  " + right
 	}
 
+	// narrow screens: drop segments from the right, storage first, so
+	// health and writes stay visible as long as possible
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 && segStorage != "" {
+		right = fmt.Sprintf("%s %s  %s", dot, st, writes)
+		gap = m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	}
+	if gap < 1 {
+		right = trim(fmt.Sprintf("%s %s", dot, st), max(1, m.width-lipgloss.Width(left)))
+		gap = m.width - lipgloss.Width(left) - lipgloss.Width(right)
+	}
 	if gap < 1 {
 		gap = 1
 	}

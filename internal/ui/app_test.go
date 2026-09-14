@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"nexus-tui/internal/nexus"
 )
@@ -284,5 +287,106 @@ func TestSearchDebounceFires(t *testing.T) {
 	stale := searchDebounceMsg{ver: m.searchVer - 1, query: "mav"}
 	if next, _ := m.Update(stale); next.(Model).loading {
 		t.Error("stale debounce msg triggered loading")
+	}
+}
+
+// plain strips ANSI escapes so header assertions see visible text.
+func plain(s string) string {
+	return regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(s, "")
+}
+
+func headerLine(m Model, w int) string {
+	m.width = w
+	return plain(m.header())
+}
+
+func TestHeaderRichData(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.status = "writable"
+	m.nxVer = "3.86.2-01"
+	m.checks = []checkRow{
+		{name: "cpu", st: nexus.CheckResult{Healthy: true}},
+		{name: "disk", st: nexus.CheckResult{Healthy: true}},
+	}
+	m.blobs = []nexus.BlobStore{{Name: "default", AvailableSpace: 5 << 30}}
+
+	line := headerLine(m, 120)
+	for _, want := range []string{"nx:3.86.2-01", "checks:2/2", "blobs:1/1", "5.0 GiB free", "writable", "writes:off"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("header missing %q: %q", want, line)
+		}
+	}
+}
+
+func TestHeaderDegrades(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.status = "writable"
+	// nxVer empty -> nx:-; no checks, no blobs, no ro
+	line := headerLine(m, 120)
+	if !strings.Contains(line, "nx:-") {
+		t.Errorf("header missing fallback %q: %q", "nx:-", line)
+	}
+	if strings.Contains(line, "checks:") {
+		t.Errorf("header shows checks without data: %q", line)
+	}
+	if strings.Contains(line, "blobs:") {
+		t.Errorf("header shows blobs without data: %q", line)
+	}
+}
+
+func TestHeaderFailureStates(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.status = "read-only"
+	m.checks = []checkRow{
+		{name: "cpu", st: nexus.CheckResult{Healthy: true}},
+		{name: "disk", st: nexus.CheckResult{Healthy: false}},
+	}
+	m.blobs = []nexus.BlobStore{{Name: "default", AvailableSpace: 100 << 20}} // under 1 GiB
+
+	line := headerLine(m, 120)
+	for _, want := range []string{"checks:1/2", "blobs:0/1", "read-only"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("header missing %q: %q", want, line)
+		}
+	}
+}
+
+func TestHeaderReadOnlyFrozen(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.status = "writable"
+	m.roKnown = true
+	m.readOnly = nexus.ReadOnlyState{Frozen: true, SummaryReason: "db locked"}
+
+	line := headerLine(m, 120)
+	if !strings.Contains(line, "RO:frozen(db locked)") {
+		t.Errorf("header missing RO:frozen: %q", line)
+	}
+}
+
+func TestHeaderNarrowDropsStorage(t *testing.T) {
+	cs := testClients(t)
+	m := New(cs, "a")
+	m.status = "writable"
+	m.nxVer = "3.86.2-01"
+	m.checks = []checkRow{{name: "cpu", st: nexus.CheckResult{Healthy: true}}}
+	m.blobs = []nexus.BlobStore{{Name: "default", AvailableSpace: 5 << 30}}
+
+	wide := headerLine(m, 120)
+	if !strings.Contains(wide, "blobs:1/1") {
+		t.Fatalf("wide header missing blobs: %q", wide)
+	}
+	narrow := headerLine(m, 80)
+	if strings.Contains(narrow, "blobs:") {
+		t.Errorf("narrow header still shows blobs: %q", narrow)
+	}
+	if !strings.Contains(narrow, "checks:") {
+		t.Errorf("narrow header dropped checks: %q", narrow)
+	}
+	if lipgloss.Width(m.header()) > 80 { // headerLine already set width; recompute plain width
+		t.Errorf("narrow header exceeds 80 cols")
 	}
 }

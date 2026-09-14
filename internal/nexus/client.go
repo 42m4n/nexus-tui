@@ -130,6 +130,36 @@ func (c *Client) Status() (string, error) {
 	return "writable", nil
 }
 
+// ServerVersion returns the Nexus product version from swagger.json.
+// Unauthenticated on OSS; the Server HTTP header is unreliable behind CDNs.
+func (c *Client) ServerVersion() (string, error) {
+	var out struct {
+		Info struct {
+			Version string `json:"version"`
+		} `json:"info"`
+	}
+	req, err := http.NewRequest(http.MethodGet, strings.TrimSuffix(c.base, "/v1")+"/swagger.json", nil)
+	if err != nil {
+		return "", err
+	}
+	c.auth(req)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("swagger.json: %s", resp.Status)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	if out.Info.Version == "" {
+		return "", fmt.Errorf("swagger.json: no version")
+	}
+	return out.Info.Version, nil
+}
+
 // getRaw returns the HTTP status code of a bodiless endpoint.
 func (c *Client) getRaw(path string) (int, error) {
 	req, err := http.NewRequest(http.MethodGet, c.base+path, nil)
